@@ -1,5 +1,11 @@
 import { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
 import { events } from './core/events';
+import { readRunSeed } from './core/run-seed';
+
+const { seed, fromUrl } = readRunSeed(new URL(window.location.href));
+if (!fromUrl) console.info(`Run seed ${seed}. Replay this run with ?seed=${seed}`);
+// Read by the Playwright seed test.
+document.body.dataset.seed = String(seed);
 
 const renderer = new WebGLRenderer({ antialias: false });
 renderer.setClearColor(0x000000, 1);
