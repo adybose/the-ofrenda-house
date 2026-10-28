@@ -15,7 +15,7 @@ async function brightness(page: Page, png: Buffer): Promise<number> {
 
 for (const kind of ['filler', 'key', 'corridor'] as Kind[]) {
   test(`renders a ${kind} room in fullbright`, async ({ page, consoleErrors }) => {
-    await boot(page, 'debug=fullbright');
+    await boot(page, 'debug=fullbright&skip=prologue');
     const found = await page.evaluate((k) => window.__ofrenda!.viewRoom(k), kind);
     expect(found, `no ${kind} room found`).toBeTruthy();
     await page.evaluate(() => window.__ofrenda!.frames(3));
@@ -26,7 +26,7 @@ for (const kind of ['filler', 'key', 'corridor'] as Kind[]) {
 }
 
 test('returns to the same GPU memory after walking away from chunks and back', async ({ page }) => {
-  await boot(page, 'debug=fullbright');
+  await boot(page, 'debug=fullbright&skip=prologue');
   const baseline = await page.evaluate(async () => {
     const o = window.__ofrenda!;
     o.moveTo(o.house.startCell);
@@ -50,7 +50,7 @@ test('returns to the same GPU memory after walking away from chunks and back', a
 });
 
 test('draws a typical room in at most 150 draw calls', async ({ page }) => {
-  await boot(page, 'debug=fullbright');
+  await boot(page, 'debug=fullbright&skip=prologue');
   await page.evaluate((k) => window.__ofrenda!.viewRoom(k), 'filler' as Kind);
   const calls = await page.evaluate(async () => {
     await window.__ofrenda!.frames(2);

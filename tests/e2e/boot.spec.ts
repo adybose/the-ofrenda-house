@@ -1,7 +1,7 @@
 import { NEAR_BLACK, expect, imageStats, test } from './fixtures';
 
-test('boots to a full-window near-black canvas with no console errors', async ({ page, consoleErrors }) => {
-  await page.goto('/');
+test('boots to a full-window, dim night exterior with no console errors', async ({ page, consoleErrors }) => {
+  await page.goto('/?mute=1');
   const canvas = page.locator('canvas');
   await expect(canvas).toHaveCount(1);
   await page.waitForFunction(() => document.body.dataset.ready === 'true');
@@ -13,10 +13,10 @@ test('boots to a full-window near-black canvas with no console errors', async ({
   const screenshot = await page.screenshot({ path: 'artifacts/screenshots/00-boot.png' });
   expect(screenshot.byteLength).toBeGreaterThan(0);
 
-  // The house is near-black at the start: ambient light is faint (spec 06) and the flashlight starts off.
+  // The game opens outside the mansion at night (spec 16): dim, but not black.
   const { all } = await imageStats(page, screenshot);
-  expect(all!.mean).toBeLessThanOrEqual(NEAR_BLACK.mean);
-  expect(all!.p99).toBeLessThanOrEqual(NEAR_BLACK.p99);
+  expect(all!.mean).toBeGreaterThan(NEAR_BLACK.mean);
+  expect(all!.mean).toBeLessThan(90);
 
   expect(consoleErrors).toEqual([]);
 });

@@ -52,6 +52,12 @@ export class Lightning {
       every?: number;
       /** Called when a strike's last pulse has faded (spec 03 reshuffles then). */
       onEnd?(): void;
+      /** True while the player is outside the house (spec 16): light from the sky, not a window. */
+      outdoors?(): boolean;
+      /** Every frame, the flash level 0..1 (the sky and rain outside brighten with it). */
+      onFlash?(level: number): void;
+      /** Seconds until the first strike, overriding the schedule. */
+      firstIn?: number;
     },
   ) {
     this.light = new DirectionalLight(config.color, 0);
@@ -76,6 +82,7 @@ export class Lightning {
     scene.add(this.light, this.target, this.sky);
     this.schedule = createLightningSchedule(options.rng.fork('schedule'));
     this.upcoming = this.nextStrike();
+    if (options.firstIn !== undefined) this.upcoming = { ...this.upcoming, at: options.firstIn };
   }
 
   private nextStrike(): Strike {
@@ -106,6 +113,25 @@ export class Lightning {
   }
 
   private aim(spot: WindowSpot | undefined, yaw: number): void {
+    const shadowCamera = this.light.shadow.camera;
+    if (this.options.outdoors?.()) {
+      // From the sky behind the house: it stands black against the flash, and throws its shadow
+      // and the trees' across the grounds towards the player.
+      const { from, towards, shadowExtent } = config.outdoor;
+      this.light.position.set(...from);
+      this.target.position.set(...towards);
+      this.target.updateMatrixWorld();
+      shadowCamera.left = shadowCamera.bottom = -shadowExtent;
+      shadowCamera.right = shadowCamera.top = shadowExtent;
+      shadowCamera.far = 160;
+      shadowCamera.updateProjectionMatrix();
+      this.light.userData.window = 'sky';
+      return;
+    }
+    shadowCamera.left = shadowCamera.bottom = -config.shadowExtent;
+    shadowCamera.right = shadowCamera.top = config.shadowExtent;
+    shadowCamera.far = 40;
+    shadowCamera.updateProjectionMatrix();
     if (!spot) {
       this.light.userData.window = undefined;
       return;
@@ -147,10 +173,12 @@ export class Lightning {
     }
 
     const throughWindow = this.light.userData.window !== undefined;
+    const outdoors = this.options.outdoors?.() ?? false;
     const lit = level > 0 && throughWindow;
-    this.light.intensity = lit ? config.intensity * level : 0;
+    this.light.intensity = lit ? (outdoors ? config.outdoor.intensity : config.intensity) * level : 0;
     this.light.shadow.autoUpdate = lit;
-    this.sky.intensity = config.skyGlow * level;
+    this.sky.intensity = (outdoors ? config.outdoor.skyGlow : config.skyGlow) * level;
+    this.options.onFlash?.(level);
     this.options.glass.color = new Color().setScalar(1 + config.glassGlow * level);
   }
 

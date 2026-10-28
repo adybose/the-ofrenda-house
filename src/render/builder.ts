@@ -96,6 +96,50 @@ export class GeometryBuilder {
 export const shadeTint = ([r, g, b]: Tint, f: number): Tint => [r * f, g * f, b * f];
 
 /**
+ * A box at any angle: centre, three unit axes (right, up, out) and half-sizes along them.
+ * For crooked shutters, boarding planks, leaning gravestones and branches.
+ */
+export function orientedBox(
+  b: GeometryBuilder,
+  centre: Vec3,
+  axes: readonly [Vec3, Vec3, Vec3],
+  half: readonly [number, number, number],
+  rect: UvRect,
+  tint?: Tint,
+): void {
+  const [ax, ay, az] = axes;
+  const corner = (sx: number, sy: number, sz: number): Vec3 => [
+    centre[0] + ax[0] * half[0] * sx + ay[0] * half[1] * sy + az[0] * half[2] * sz,
+    centre[1] + ax[1] * half[0] * sx + ay[1] * half[1] * sy + az[1] * half[2] * sz,
+    centre[2] + ax[2] * half[0] * sx + ay[2] * half[1] * sy + az[2] * half[2] * sz,
+  ];
+  const face = (a: Vec3, bb: Vec3, c: Vec3, d: Vec3) => b.tile(a, bb, c, d, rect, tint);
+  face(corner(-1, -1, 1), corner(1, -1, 1), corner(1, 1, 1), corner(-1, 1, 1)); // +out
+  face(corner(1, -1, -1), corner(-1, -1, -1), corner(-1, 1, -1), corner(1, 1, -1)); // -out
+  face(corner(1, -1, 1), corner(1, -1, -1), corner(1, 1, -1), corner(1, 1, 1)); // +right
+  face(corner(-1, -1, -1), corner(-1, -1, 1), corner(-1, 1, 1), corner(-1, 1, -1)); // -right
+  face(corner(-1, 1, 1), corner(1, 1, 1), corner(1, 1, -1), corner(-1, 1, -1)); // +up
+  face(corner(-1, -1, -1), corner(1, -1, -1), corner(1, -1, 1), corner(-1, -1, 1)); // -up
+}
+
+const normalize = (v: Vec3): Vec3 => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+};
+const cross = (a: Vec3, c: Vec3): Vec3 => [a[1] * c[2] - a[2] * c[1], a[2] * c[0] - a[0] * c[2], a[0] * c[1] - a[1] * c[0]];
+
+/** A square-section beam from one point to another (tree limbs, wheel spokes). */
+export function beam(b: GeometryBuilder, from: Vec3, to: Vec3, radius: number, rect: UvRect, tint?: Tint): void {
+  const along = normalize([to[0] - from[0], to[1] - from[1], to[2] - from[2]]);
+  const helper: Vec3 = Math.abs(along[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const side = normalize(cross(helper, along));
+  const out = normalize(cross(along, side));
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const centre: Vec3 = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2];
+  orientedBox(b, centre, [side, along, out], [radius, length / 2, radius], rect, tint);
+}
+
+/**
  * A local frame on the floor: `right` and `out` are unit vectors in (x, z).
  * Wall props use the wall's face as origin, `out` pointing into the room.
  */

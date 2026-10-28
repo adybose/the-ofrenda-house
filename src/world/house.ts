@@ -47,6 +47,8 @@ export interface House {
   endAct1(): void;
   revealDiningRoom(visible: ReadonlySet<CellId>, playerCell: CellId, facing: Dir): ChunkDiff;
   unsealFrontDoor(): void;
+  /** The door slams and locks behind the player (spec 16); only the ending opens it again. */
+  sealFrontDoor(): void;
   markVisited(characterId: CharacterId): void;
   pathBetween(a: CellId, b: CellId, blocked?: (cell: CellId) => boolean): CellId[] | null;
   roomAt(cell: CellId): Room | undefined;
@@ -544,6 +546,10 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
 
     unsealFrontDoor() {
       setDoorState(FRONT_DOOR_ID, 'closed');
+    },
+
+    sealFrontDoor() {
+      setDoorState(FRONT_DOOR_ID, 'sealed');
     },
 
     markVisited(characterId) {
