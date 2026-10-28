@@ -18,6 +18,7 @@ import {
 import type { TextureCache, UvRect } from './atlas';
 import { GeometryBuilder, at, frameBox, shadeTint, type Frame, type Tint } from './builder';
 import {
+  addCandle,
   addChandelier,
   addClock,
   addDoorPanel,
@@ -35,6 +36,8 @@ const C = CELL_SIZE;
 export interface ChunkMeshData {
   doors: Map<DoorId, { index: number; x: number; z: number; yaw: number; swing: number }>;
   chandeliers: Map<CellId, number>;
+  /** Where candle light comes from (key rooms, the ofrenda), in world metres. */
+  candles: [number, number, number][];
 }
 
 /** The wall face on `side` of a cell: origin at its left end, `out` into the room. */
@@ -141,11 +144,13 @@ function doorMatrix(door: ChunkMeshData['doors'] extends Map<DoorId, infer D> ? 
 export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
   const group = new Group();
   group.name = `chunk:${chunk.id}`;
-  const data: ChunkMeshData = { doors: new Map(), chandeliers: new Map() };
+  const data: ChunkMeshData = { doors: new Map(), chandeliers: new Map(), candles: [] };
   group.userData = data;
 
   const b = new GeometryBuilder();
   const portraits = new GeometryBuilder();
+  // Glass gets its own mesh: it must not block lightning, and it glows when lightning flashes.
+  const glass = new GeometryBuilder();
   const chandelierAt: [number, number, number][] = [];
 
   for (const room of chunk.rooms) {
@@ -197,7 +202,7 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
           wallPiece(b, f, wallRect, height, tint, left, right, 0, WINDOW_SILL);
           wallPiece(b, f, wallRect, height, tint, left, right, top, height);
           // Night glass set back in the wall, a wooden frame and mullions.
-          b.tile(at(f, left, WINDOW_SILL, -WALL_INSET + 0.02), at(f, right, WINDOW_SILL, -WALL_INSET + 0.02), at(f, right, top, -WALL_INSET + 0.02), at(f, left, top, -WALL_INSET + 0.02), textures.uv('window'));
+          glass.tile(at(f, left, WINDOW_SILL, -WALL_INSET + 0.02), at(f, right, WINDOW_SILL, -WALL_INSET + 0.02), at(f, right, top, -WALL_INSET + 0.02), at(f, left, top, -WALL_INSET + 0.02), textures.uv('window'));
           const wood = textures.uv('wood');
           const reveal: [number, number] = [-WALL_INSET, 0.03];
           frameBox(b, f, [left - 0.06, right + 0.06], [WINDOW_SILL - 0.06, WINDOW_SILL], [-WALL_INSET, 0.1], wood);
@@ -231,6 +236,7 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
       } else if (anchor.kind === 'ofrenda') {
         const [ax, az] = cellCentre(anchor.cell);
         addOfrenda(b, textures, { x: ax, z: az, right: [1, 0], out: [0, 1] });
+        data.candles.push([ax, 1.3, az + 0.4]);
       } else if (anchor.side) {
         const f = centredFrame(anchor.cell, anchor.side);
         if (anchor.kind === 'fireplace') addFireplace(b, textures, f);
@@ -253,6 +259,13 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
         const f = centredFrame(cell, side);
         addPortraitFrame(b, textures, f, 1.7);
         addPortraitPicture(portraits, textures.portraitUv(room.characterId), f, 1.7);
+        // A few candles burn on the floor beneath the spirit's portrait, the room's only light.
+        for (const [along, out, height] of [[-0.25, 0.3, 0.25], [0.05, 0.38, 0.18], [0.3, 0.28, 0.3]] as const) {
+          const p = at(f, along, 0, out);
+          addCandle(b, textures, p[0], 0, p[2], height);
+        }
+        const light = at(f, 0, 0.5, 0.45);
+        data.candles.push([light[0], light[1], light[2]]);
         break;
       }
     }
@@ -283,18 +296,29 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
 
   const staticMesh = new Mesh(b.build(), textures.material);
   staticMesh.name = 'static';
+  staticMesh.castShadow = true;
+  staticMesh.receiveShadow = true;
   group.add(staticMesh);
 
   if (portraits.vertexCount > 0) {
     const portraitMesh = new Mesh(portraits.build(), textures.portraitMaterial);
     portraitMesh.name = 'portraits';
+    portraitMesh.receiveShadow = true;
     group.add(portraitMesh);
+  }
+
+  if (glass.vertexCount > 0) {
+    const glassMesh = new Mesh(glass.build(), textures.glassMaterial);
+    glassMesh.name = 'windows';
+    group.add(glassMesh);
   }
 
   const shapes = sharedShapes(textures);
   if (chunk.doors.length > 0) {
     const doors = new InstancedMesh(shapes.door, textures.material, chunk.doors.length);
     doors.name = 'doors';
+    doors.castShadow = true;
+    doors.receiveShadow = true;
     for (const door of chunk.doors) {
       const info = data.doors.get(door.id)!;
       doors.setMatrixAt(info.index, doorMatrix(info, door.state === 'open' ? 1 : 0));
@@ -305,6 +329,8 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
   if (chandelierAt.length > 0) {
     const chandeliers = new InstancedMesh(shapes.chandelier, textures.material, chandelierAt.length);
     chandeliers.name = 'chandeliers';
+    chandeliers.castShadow = true;
+    chandeliers.receiveShadow = true;
     chandelierAt.forEach(([x, y, z], i) => chandeliers.setMatrixAt(i, new Matrix4().setPosition(x, y, z)));
     chandeliers.computeBoundingSphere();
     group.add(chandeliers);

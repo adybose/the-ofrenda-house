@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, test } from './fixtures';
+import { expect, imageStats, test } from './fixtures';
 
 type Kind = 'filler' | 'key' | 'corridor';
 
@@ -8,22 +8,9 @@ async function boot(page: Page, query: string) {
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
 }
 
-/** Mean brightness (0-255) of a screenshot, decoded in the page. */
+/** Mean brightness (0-255) of a screenshot. */
 async function brightness(page: Page, png: Buffer): Promise<number> {
-  return page.evaluate(async (base64) => {
-    const image = new Image();
-    image.src = `data:image/png;base64,${base64}`;
-    await image.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(image, 0, 0);
-    const { data } = ctx.getImageData(0, 0, image.width, image.height);
-    let sum = 0;
-    for (let i = 0; i < data.length; i += 4) sum += (data[i]! + data[i + 1]! + data[i + 2]!) / 3;
-    return sum / (data.length / 4);
-  }, png.toString('base64'));
+  return (await imageStats(page, png)).all!.mean;
 }
 
 for (const kind of ['filler', 'key', 'corridor'] as Kind[]) {

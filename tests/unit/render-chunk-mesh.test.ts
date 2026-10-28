@@ -21,14 +21,14 @@ function meshes(group: ReturnType<typeof buildChunkMesh>): Mesh[] {
 }
 
 describe('buildChunkMesh', () => {
-  it('draws a chunk in at most 4 meshes: static, portraits, doors and chandeliers', () => {
+  it('draws a chunk in at most 5 meshes: static, portraits, window glass, doors and chandeliers', () => {
     const { house, textures } = setup(42);
     for (let cx = -2; cx <= 2; cx++) {
       for (let cy = 0; cy <= 2; cy++) {
         const chunk = house.chunkAt(cx, cy);
         const group = buildChunkMesh(chunk, textures);
         const all = meshes(group);
-        expect(all.length).toBeLessThanOrEqual(4);
+        expect(all.length).toBeLessThanOrEqual(5);
         const staticMesh = all.find((m) => m.name === 'static');
         expect(staticMesh?.geometry.getAttribute('position').count).toBeGreaterThan(1000);
         const doors = all.find((m) => m.name === 'doors') as InstancedMesh | undefined;
