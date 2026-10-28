@@ -62,6 +62,7 @@ Vitest: thunder delay, impulse responses. Playwright: offline renders of each so
 - `/?seed=42&skip=act1&lightning=10`: the real thing. Click to start audio, F for the torch, E to open the exit, and walk: footsteps change on tile, carpet and stone, doors creak and slam, and thunder follows each flash after its distance delay.
 
 ## Decisions
+- Merged into main on 29 October 2026 ahead of the listening check, at the user's request, so spec 16 could follow. The status stays In progress until the checklist is ticked.
 - Nothing audio exists until the first click or key press (`connectGameAudio` listens for it); spec 14's title-screen click will be that gesture.
 - Rain and wind loop indefinitely at no ongoing cost. Rain is three noise layers: a broadband roar, a low body (rain on roof and ground) and an 8 s loop of drop impacts from `rainGrains` (white-noise grains with sharp decays and random brightness, plus heavier splats). Wind is brown noise through a band-pass whose frequency and level drift on slow oscillators. The rain's level swells and fades on a seeded random path. (A first version scheduled every raindrop for hours ahead and stalled unlocking for over 10 s; a second rendered drops as sine pings, which rang like wind chimes. A unit test now checks the drops' loudest moments are noise, not tones: spectral flatness 0.49 against 0.003 for the old pings.)
 - Thunder has a sub-bass boom (42 to 24 Hz) under the crack and the rolling rumble, and far strikes rumble for up to 8 s.
