@@ -1,5 +1,5 @@
 # 01: Seeded randomness
-Status: Approved
+Status: Done
 Depends on: 00
 
 ## Goal
@@ -39,14 +39,14 @@ What any stream is used to generate.
 
 ## Acceptance checks
 Must:
-- [ ] The same seed gives the same first 10,000 values; the first 5 values for seed 42 are pinned in a test so an accidental algorithm change is caught.
-- [ ] Drawing any number of values from `fork("a")` leaves `fork("b")` unchanged.
-- [ ] The same label on the same seed gives the same stream; different labels give different streams.
-- [ ] `int` stays inside its inclusive bounds over 100,000 draws and passes a loose chi-square uniformity test.
-- [ ] `pick`, `weighted` and `shuffle` never mutate their input; `pick([])` throws.
+- [x] The same seed gives the same first 10,000 values; the first 5 values for seed 42 are pinned in a test so an accidental algorithm change is caught.
+- [x] Drawing any number of values from `fork("a")` leaves `fork("b")` unchanged.
+- [x] The same label on the same seed gives the same stream; different labels give different streams.
+- [x] `int` stays inside its inclusive bounds over 100,000 draws and passes a loose chi-square uniformity test.
+- [x] `pick`, `weighted` and `shuffle` never mutate their input; `pick([])` throws.
 Should:
-- [ ] Playwright: `?seed=42` is used as the run seed, and with no seed the chosen seed is logged.
-- [ ] The lint rule rejects `Math.random()` in the pure-logic folders.
+- [x] Playwright: `?seed=42` is used as the run seed, and with no seed the chosen seed is logged.
+- [x] The lint rule rejects `Math.random()` in the pure-logic folders.
 
 ## Test plan
 Vitest: determinism snapshot, fork independence, bounds and uniformity, immutability. Playwright: seed from the URL and the console log.
