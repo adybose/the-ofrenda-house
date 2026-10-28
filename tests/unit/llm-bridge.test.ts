@@ -65,6 +65,11 @@ describe('POST /api/spirit/line with a working model', () => {
     expect(body.riddle!.options).toEqual(expect.arrayContaining(['A bell rope', 'A key', 'A lantern']));
   });
 
+  it('strips Markdown emphasis the model adds', async () => {
+    const { server: s } = await setup(() => ({ content: JSON.stringify({ line: 'Welcome, *amigo*. The rain is **heavy** tonight.' }) }));
+    expect((await line(s, { characterId: nonPatriarch.id, step: 'greeting' })).body.line).toBe('Welcome, amigo. The rain is heavy tonight.');
+  });
+
   it('rejects an unknown character or step', async () => {
     const { server: s } = await setup((body) => goodReply(stepOf(body)));
     expect((await line(s, { characterId: 'nobody', step: 'greeting' })).status).toBe(400);

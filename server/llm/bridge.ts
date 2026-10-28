@@ -30,6 +30,19 @@ function riddleFor(seed: number, character: Character, question: string, wrong: 
   return { question, options, correctIndex: options.indexOf(character.riddle.answer) };
 }
 
+/** The model likes Markdown emphasis (`*amigo*`); the dialogue box shows plain text. */
+function tidy(output: unknown): unknown {
+  const plain = (text: unknown) => (typeof text === 'string' ? text.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1').trim() : text);
+  if (!output || typeof output !== 'object') return output;
+  const o = output as Record<string, unknown>;
+  return {
+    ...o,
+    ...('line' in o ? { line: plain(o.line) } : {}),
+    ...('question' in o ? { question: plain(o.question) } : {}),
+    ...(Array.isArray(o.wrongAnswers) ? { wrongAnswers: o.wrongAnswers.map(plain) } : {}),
+  };
+}
+
 export function createBridge(config: OllamaConfig): Bridge {
   const client = new OllamaClient(config);
   const cases = new LruCache<CaseFile>(16);
@@ -58,7 +71,7 @@ export function createBridge(config: OllamaConfig): Bridge {
     const deadline = Date.now() + budgetMs;
     for (let attempt = 0; attempt < 2 && deadline - Date.now() > MIN_RETRY_MS; attempt++) {
       try {
-        const output = await client.chat(messages, schemaFor(step), priority, deadline);
+        const output = tidy(await client.chat(messages, schemaFor(step), priority, deadline));
         const result = validateStep(step, output, ctx);
         if (result.ok) return result.value;
       } catch {
