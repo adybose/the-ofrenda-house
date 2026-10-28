@@ -1,4 +1,6 @@
-import { AmbientLight, Color, FogExp2, HemisphereLight, PerspectiveCamera, Scene, Timer, WebGLRenderer } from 'three';
+import { AmbientLight, Color, FogExp2, HemisphereLight, PerspectiveCamera, Scene, Timer, Vector3, WebGLRenderer } from 'three';
+import { AudioEngine } from './audio/engine';
+import { connectGameAudio } from './audio/game-audio';
 import { generateCase } from './case/generate';
 import { events } from './core/events';
 import { STREAMS, createRng } from './core/rng';
@@ -160,6 +162,12 @@ async function startGame(): Promise<void> {
   });
   const candles = new CandleLights(scene);
 
+  // Sound: unlocked by the first click or key press. `?mute=1` keeps it silent (automated tests).
+  const audio = new AudioEngine({ seed, muted: url.searchParams.get('mute') === '1' });
+  connectGameAudio(audio, house);
+  let windowCheck = 0;
+  const forward = new Vector3();
+
   const fpsTools = debug.has('fps') ? await import('./debug/fps') : undefined;
   const fps = fpsTools?.createFpsOverlay();
   const walkSeconds = Number(url.searchParams.get('walk') ?? 0);
@@ -186,6 +194,15 @@ async function startGame(): Promise<void> {
     flashlight.update(dt, camera);
     lightning.update(dt);
     candles.update(dt, camera.position, view.candles());
+    camera.getWorldDirection(forward);
+    audio.setListener(camera.position.toArray(), forward.toArray());
+    if ((windowCheck -= dt) <= 0) {
+      // Twice a second is plenty for how muffled the storm sounds.
+      windowCheck = 0.5;
+      const near = nearestWindow(exteriorWindows(), camera.position.x, camera.position.z, 30);
+      audio.setWindowDistance(near ? Math.hypot(near.x - camera.position.x, near.z - camera.position.z) : 30);
+    }
+    audio.update();
     renderer.info.reset();
     post.render(renderer, scene, camera, time / 1000);
     lastDrawCalls = renderer.info.render.calls;
@@ -194,10 +211,11 @@ async function startGame(): Promise<void> {
 
   if (debug.size > 0) {
     const { installDebugHooks } = await import('./debug/hooks');
-    installDebugHooks({ seed, house, applyDiff, player, prompt, keys, flashlight, lightning, renderer, lastDrawCalls: () => lastDrawCalls });
+    installDebugHooks({ seed, house, applyDiff, player, prompt, keys, flashlight, lightning, audio, renderer, lastDrawCalls: () => lastDrawCalls });
   }
   if (debug.has('map')) (await import('./debug/map')).showHouseMap(seed);
   if (debug.has('portraits')) (await import('./debug/portraits')).showPortraitSheet(seed);
+  if (debug.has('soundboard')) (await import('./debug/soundboard')).showSoundboard(audio);
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
