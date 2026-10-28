@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../../server/index';
 
 describe('GET /api/health', () => {
-  const server = buildServer();
+  // Point at a port nothing listens on, so the result doesn't depend on a local Ollama.
+  const server = buildServer({ ollama: { host: 'http://127.0.0.1:9' } });
   afterEach(async () => {
     await server.close();
   });
