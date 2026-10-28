@@ -1,5 +1,5 @@
 # 00: Scaffold and constitution
-Status: Approved
+Status: Done
 Depends on: none
 
 ## Goal
@@ -34,15 +34,15 @@ Any game content; rendering beyond a cleared canvas; seeded randomness (01); LLM
 
 ## Acceptance checks
 Must:
-- [ ] `npm run dev` serves a page on localhost showing a full-window black canvas with no console errors.
-- [ ] `npm run check` runs lint, type check and unit tests, and fails when any one of them fails.
-- [ ] `GET /api/health` returns 200 with `ok: true` (Vitest via `buildServer().inject`).
-- [ ] Playwright boot test: the canvas fills the viewport; screenshot saved to `artifacts/screenshots/00-boot.png`.
-- [ ] Playwright offline guard: every request the page makes goes to localhost.
-- [ ] `CLAUDE.md` contains the six constitution rules.
+- [x] `npm run dev` serves a page on localhost showing a full-window black canvas with no console errors.
+- [x] `npm run check` runs lint, type check and unit tests, and fails when any one of them fails.
+- [x] `GET /api/health` returns 200 with `ok: true` (Vitest via `buildServer().inject`).
+- [x] Playwright boot test: the canvas fills the viewport; screenshot saved to `artifacts/screenshots/00-boot.png`.
+- [x] Playwright offline guard: every request the page makes goes to localhost.
+- [x] `CLAUDE.md` contains the six constitution rules.
 Should:
-- [ ] The event bus has unit tests for `on`, `off` and `emit`, and a type test showing a wrong payload fails to compile.
-- [ ] `npm run check` finishes in under 30 seconds on the M1 Pro.
+- [x] The event bus has unit tests for `on`, `off` and `emit`, and a type test showing a wrong payload fails to compile.
+- [x] `npm run check` finishes in under 30 seconds on the M1 Pro.
 
 ## Test plan
 Vitest: event bus, health route via `inject`. Playwright: boot screenshot and the offline request guard fixture.
