@@ -1,4 +1,6 @@
 import type { WebGLRenderer } from 'three';
+import type { AudioEngine } from '../audio/engine';
+import { SOUND_NAMES, type SoundName } from '../audio/synths';
 import { events, type GameEvents } from '../core/events';
 import type { Flashlight } from '../lighting/flashlight';
 import type { Lightning, StrikeOptions } from '../lighting/lightning';
@@ -38,6 +40,14 @@ export interface OfrendaDebug {
   holdLightning(level: number | undefined): void;
   /** Where the lightning light is and which window it uses. */
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
+  soundNames(): SoundName[];
+  /** Renders a sound offline and summarises it (spec 07's check). */
+  renderSound(name: SoundName): Promise<{ peak: number; rms: number; hasNaN: boolean; seconds: number }>;
+  audioState(): string;
+  ambienceGain(): number;
+  masterGain(): number;
+  testVoice(seconds: number): void;
+  setTension(level: number): void;
   /** Moves to a room of the given kind and frames it for a screenshot. */
   viewRoom(kind: DebugRoomKind): boolean;
   frames(count: number): Promise<void>;
@@ -60,6 +70,7 @@ export function installDebugHooks(options: {
   keys: Set<string>;
   flashlight: Flashlight;
   lightning: Lightning;
+  audio: AudioEngine;
   renderer: WebGLRenderer;
   lastDrawCalls: () => number;
 }): void {
@@ -144,6 +155,27 @@ export function installDebugHooks(options: {
     flashlight: () => ({ on: options.flashlight.on, level: options.flashlight.level }),
     strike: (strikeOptions) => void options.lightning.strike(strikeOptions),
     holdLightning: (level) => options.lightning.hold(level, { yaw: 0.2 }),
+    soundNames: () => [...SOUND_NAMES],
+    async renderSound(name) {
+      // Long enough for each sound's tail; thunder close, the clock striking three.
+      const seconds = name === 'thunder' ? 7 : name === 'clock' ? 8 : 3;
+      const param = name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0;
+      const samples = await options.audio.renderOffline(name, seconds, param);
+      let peak = 0;
+      let sum = 0;
+      let hasNaN = false;
+      for (const v of samples) {
+        if (Number.isNaN(v)) hasNaN = true;
+        peak = Math.max(peak, Math.abs(v));
+        sum += v * v;
+      }
+      return { peak, rms: Math.sqrt(sum / samples.length), hasNaN, seconds };
+    },
+    audioState: () => options.audio.state,
+    ambienceGain: () => options.audio.levels().ambience,
+    masterGain: () => options.audio.levels().master,
+    testVoice: (seconds) => options.audio.testVoice(seconds),
+    setTension: (level) => options.audio.setTension(level),
     lightningInfo: () => {
       const light = options.lightning.light;
       return {
