@@ -34,3 +34,7 @@ renderer.setAnimationLoop(() => {
 
 document.body.dataset.ready = 'true';
 events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
+
+if (new URL(window.location.href).searchParams.get('debug') === 'map') {
+  void import('./debug/map').then(({ showHouseMap }) => showHouseMap(seed));
+}
