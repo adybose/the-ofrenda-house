@@ -53,6 +53,11 @@ export const TEXTURE_KINDS = [
   'leaves',
   'whiteFlower',
   'pianoKeys',
+  // The exterior (spec 16), 64 × 64.
+  'slate',
+  'mud',
+  'gravel',
+  'bark',
 ] as const;
 
 export type TextureKind = (typeof TEXTURE_KINDS)[number];
@@ -424,6 +429,61 @@ function pianoKeys(rng: Rng): PixelImage {
   return image;
 }
 
+function slate(rng: Rng): PixelImage {
+  const image = createImage(W, 64, [18, 20, 24]);
+  // Overlapping courses of slates, each offset by half a slate, with moss creeping in.
+  for (let row = 0; row < 4; row++) {
+    const offset = row % 2 ? 8 : 0;
+    for (let col = -1; col < 4; col++) {
+      const tone = 46 + rng.int(-10, 10);
+      rect(image, col * 16 + offset + 1, row * 16, 14, 15, [tone, tone + 3, tone + 10]);
+      if (rng.chance(0.15)) rect(image, col * 16 + offset + 1, row * 16 + 10, 14, 5, [40, 52, 30]);
+    }
+  }
+  jitter(image, rng, 0.12);
+  age(image, rng, 0.35);
+  return image;
+}
+
+function mud(rng: Rng): PixelImage {
+  const image = createImage(W, 64);
+  const noise = valueNoise(rng, 6);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      const n = noise(x / 64, y / 64);
+      // Dark wet earth, dead grass in patches, and black puddles in the hollows.
+      const colour: RGB = n > 0.62 ? [44, 48, 30] : n < 0.28 ? [14, 16, 20] : [40, 32, 24];
+      setPixel(image, x, y, shade(colour, 0.8 + rng.float() * 0.3));
+    }
+  }
+  for (let i = 0; i < 40; i++) line(image, rng.int(0, 63), rng.int(0, 63), rng.int(0, 63), rng.int(0, 63), [52, 56, 34]);
+  return image;
+}
+
+function gravel(rng: Rng): PixelImage {
+  const image = createImage(W, 64, [46, 44, 42]);
+  for (let i = 0; i < 260; i++) {
+    const tone = 50 + rng.int(-25, 45);
+    ellipse(image, rng.int(0, 63), rng.int(0, 63), 1 + rng.float() * 1.5, 1 + rng.float() * 1.2, [tone, tone - 2, tone - 6]);
+  }
+  jitter(image, rng, 0.1);
+  return image;
+}
+
+function bark(rng: Rng): PixelImage {
+  const image = createImage(W, 64);
+  const grain = valueNoise(rng, 8);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      // Deep vertical furrows in grey, dead wood.
+      const furrow = Math.abs(Math.sin((x / 64) * Math.PI * 9 + grain(x / 64, y / 64) * 4));
+      setPixel(image, x, y, shade([58, 52, 46], 0.45 + furrow * 0.7));
+    }
+  }
+  jitter(image, rng, 0.08);
+  return image;
+}
+
 /** Generates one texture as RGBA pixels. Pure and seeded, so it can be tested in Node. */
 export function generateTexture(kind: TextureKind, rng: Rng): PixelImage {
   switch (kind) {
@@ -493,5 +553,13 @@ export function generateTexture(kind: TextureKind, rng: Rng): PixelImage {
       return leaves(rng, [236, 236, 226]);
     case 'pianoKeys':
       return pianoKeys(rng);
+    case 'slate':
+      return slate(rng);
+    case 'mud':
+      return mud(rng);
+    case 'gravel':
+      return gravel(rng);
+    case 'bark':
+      return bark(rng);
   }
 }

@@ -32,6 +32,7 @@ house.shiftCorridorBehind(): ChunkDiff                   // Act 1: walls up the 
 house.endAct1(): void                                    // unseals the Act 1 corridor's far door into the house
 house.revealDiningRoom(visible, playerCell, facing: Dir): ChunkDiff
 house.unsealFrontDoor(): void
+house.sealFrontDoor(): void                              // added by spec 16: the door slams and locks behind the player
 house.markVisited(characterId): void                     // also done by update() when the player enters a key room
 house.pathBetween(a: CellId, b: CellId, blocked?: (c: CellId) => boolean): CellId[] | null
 house.roomAt(cell), house.getRoom(roomId), house.getDoor(doorId), house.doorBetween(a, b), house.loadedChunks(), house.chunkAt(cx, cy)

@@ -17,8 +17,11 @@ import { createPlayerController } from './player/controller';
 import { DoorController } from './player/doors';
 import { Interactions } from './player/interaction';
 import { createPlayerState } from './player/movement';
+import { createExteriorScene } from './render/exterior-mesh';
+import { Arrival } from './story/arrival';
 import { createPrompt } from './ui/prompt';
 import { createCollisionMap } from './world/collision';
+import { composeCollision, exteriorCollision, exteriorLayout } from './world/exterior';
 import { DIR_STEP, cellId, parseCell } from './world/grid';
 import { createHouse } from './world/house';
 import type { CellId, ChunkDiff, Room } from './world/types';
@@ -80,34 +83,53 @@ async function startGame(): Promise<void> {
     doors.sync(diff);
   };
 
-  // `?skip=act1` (spec 14 will own it): start at the end of the Act 1 corridor with the way into the house unsealed.
-  const skipAct1 = url.searchParams.get('skip') === 'act1';
-  if (skipAct1) house.endAct1();
-  const startCell = skipAct1 ? '1,2' : house.startCell;
-  const [startX, startZ] = cellCentre(startCell);
-  applyDiff(house.update(startCell));
+  // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall,
+  // `?skip=act1` at the end of the Act 1 corridor with the way into the house unsealed (spec 14
+  // will own both); the fps walk drives the camera inside, so it skips the arrival too.
+  const skip = url.searchParams.get('skip');
+  const walkSeconds = Number(url.searchParams.get('walk') ?? 0);
+  const outside = skip !== 'prologue' && skip !== 'act1' && walkSeconds === 0;
+  if (skip === 'act1') house.endAct1();
+  const layout = outside ? exteriorLayout(seed) : undefined;
+  const startCell = skip === 'act1' ? '1,2' : house.startCell;
+  const [cellX, cellZ] = cellCentre(startCell);
+  const start = layout?.start ?? { x: cellX, z: cellZ, yaw: skip === 'act1' ? Math.PI / 2 : 0 };
+  // Outside, only the entrance wing is built (seen through the doorway); the rest of the house
+  // waits until the door has slammed, so nothing inside can show past the mansion's outer walls.
+  if (outside) applyDiff({ loaded: [house.chunkAt(0, 0)], unloaded: [] });
+  else applyDiff(house.update(startCell));
 
+  const houseCollision = createCollisionMap(house, seed);
+  const grounds = layout ? exteriorCollision(layout) : undefined;
+  let inGrounds = outside;
   const prompt = createPrompt();
   const player = createPlayerController({
     camera,
     canvas: renderer.domElement,
     house,
-    collision: createCollisionMap(house, seed),
+    collision: { boxesNear: (x, z, r) => (inGrounds && grounds ? composeCollision(houseCollision, grounds) : houseCollision).boxesNear(x, z, r) },
     interactions,
     prompt,
-    // Face north into the portrait hall, or west towards the Act 1 exit.
-    start: createPlayerState(startX, startZ, skipAct1 ? Math.PI / 2 : 0),
+    start: createPlayerState(start.x, start.z, start.yaw),
   });
-  events.on('playerCellChanged', ({ cell }) => applyDiff(house.update(cell)));
+  // Built once the lightning and audio it drives exist; read by handlers set up before then.
+  let arrival: Arrival | undefined = undefined;
+  events.on('playerCellChanged', ({ cell }) => {
+    if (!arrival || arrival.stage === 'inside') applyDiff(house.update(cell));
+  });
 
-  // The dark: faint ambient light and black fog. `?debug=fullbright` lights everything for screenshots.
+  // The dark: faint ambient light and black fog; outside, blue-black fog the mansion can be seen
+  // through. `?debug=fullbright` lights everything for screenshots.
+  const indoorFog = new FogExp2(LIGHTING.fog.color, LIGHTING.fog.density);
   if (debug.has('fullbright')) {
     scene.add(new AmbientLight(0xffffff, 1.6));
     scene.add(new HemisphereLight(0xfff2dd, 0x40342a, 1.2));
   } else {
     scene.add(new AmbientLight(LIGHTING.ambient.color, LIGHTING.ambient.intensity));
-    scene.fog = new FogExp2(LIGHTING.fog.color, LIGHTING.fog.density);
+    scene.fog = outside ? new FogExp2(0x0b0e16, 0.012) : indoorFog;
   }
+  let exterior = layout ? createExteriorScene(scene, textures, layout, seed) : undefined;
+  let flash = 0;
 
   const flashlight = new Flashlight(scene, renderer);
   window.addEventListener('keydown', (event) => {
@@ -154,8 +176,13 @@ async function startGame(): Promise<void> {
     window: lightningWindow,
     glass: textures.glassMaterial,
     every,
+    outdoors: () => (arrival ? arrival.stage !== 'inside' : outside),
+    onFlash: (level) => (flash = level),
+    // Outside, the storm announces itself early.
+    firstIn: outside ? 4 : undefined,
     // The house rearranges in the dark after each flash (spec 03).
     onEnd: () => {
+      if (arrival && arrival.stage !== 'inside') return;
       const cell = worldToCell(camera.position.x, camera.position.z);
       applyDiff(house.reshuffle(visibleCells(cell), cell), { spread: true });
     },
@@ -165,20 +192,44 @@ async function startGame(): Promise<void> {
   // Sound: unlocked by the first click or key press. `?mute=1` keeps it silent (automated tests).
   const audio = new AudioEngine({ seed, muted: url.searchParams.get('mute') === '1' });
   connectGameAudio(audio, house);
+  audio.setOutdoors(outside);
   let windowCheck = 0;
+
+  arrival = new Arrival({
+    house,
+    doors,
+    audio,
+    lightning,
+    door: layout?.door ?? { x: 0, z: 0 },
+    outside,
+    onInside: () => {
+      // The outside is gone: back to the dark house, the muffled storm and normal loading.
+      exterior?.dispose();
+      exterior = undefined;
+      inGrounds = false;
+      if (!debug.has('fullbright')) scene.fog = indoorFog;
+      audio.setOutdoors(false);
+      applyDiff(house.update(worldToCell(camera.position.x, camera.position.z)));
+    },
+  });
   const forward = new Vector3();
 
   const fpsTools = debug.has('fps') ? await import('./debug/fps') : undefined;
   const fps = fpsTools?.createFpsOverlay();
-  const walkSeconds = Number(url.searchParams.get('walk') ?? 0);
   const walk =
     fpsTools && walkSeconds > 0
       ? fpsTools.startScriptedWalk({ seconds: walkSeconds, house, view, camera, rng: createRng(seed).fork('walk') })
       : undefined;
   if (walk && !debug.has('fullbright')) flashlight.toggle();
 
-  // Compile every shader now, with all lights in place, rather than mid-game.
-  renderer.compile(scene, camera);
+  // Compile every shader now, with all lights in place, and wait for the GPU to finish, so the
+  // opening shot doesn't freeze while programs link in the background.
+  await renderer.compileAsync(scene, camera);
+  // One warm-up frame while still loading, so both shadow maps are first drawn here rather than
+  // in the opening shot.
+  flashlight.update(0, camera);
+  lightning.update(0);
+  post.render(renderer, scene, camera, 0);
 
   let lastDrawCalls = 0;
   const timer = new Timer();
@@ -188,7 +239,11 @@ async function startGame(): Promise<void> {
     const dt = dtMs / 1000;
     // The scripted fps walk drives the camera itself.
     if (walk) walk.frame(dtMs, lastDrawCalls);
-    else player.update(dt);
+    else {
+      player.update(dt);
+      arrival?.update(dt, player.state().x, player.state().z);
+    }
+    exterior?.update(time / 1000, camera.position, flash);
     view.update();
     doors.update(dt);
     flashlight.update(dt, camera);
@@ -196,7 +251,7 @@ async function startGame(): Promise<void> {
     candles.update(dt, camera.position, view.candles());
     camera.getWorldDirection(forward);
     audio.setListener(camera.position.toArray(), forward.toArray());
-    if ((windowCheck -= dt) <= 0) {
+    if (!exterior && (windowCheck -= dt) <= 0) {
       // Twice a second is plenty for how muffled the storm sounds.
       windowCheck = 0.5;
       const near = nearestWindow(exteriorWindows(), camera.position.x, camera.position.z, 30);
@@ -211,7 +266,20 @@ async function startGame(): Promise<void> {
 
   if (debug.size > 0) {
     const { installDebugHooks } = await import('./debug/hooks');
-    installDebugHooks({ seed, house, applyDiff, player, prompt, keys, flashlight, lightning, audio, renderer, lastDrawCalls: () => lastDrawCalls });
+    installDebugHooks({
+      seed,
+      house,
+      applyDiff,
+      player,
+      prompt,
+      keys,
+      flashlight,
+      lightning,
+      audio,
+      arrival: () => ({ stage: arrival!.stage, exterior: exterior !== undefined }),
+      renderer,
+      lastDrawCalls: () => lastDrawCalls,
+    });
   }
   if (debug.has('map')) (await import('./debug/map')).showHouseMap(seed);
   if (debug.has('portraits')) (await import('./debug/portraits')).showPortraitSheet(seed);

@@ -88,6 +88,11 @@ export class DoorController {
     }
   }
 
+  /** Opens or shuts a door by itself, with no one touching it (the front door on arrival). */
+  force(doorId: DoorId, open: boolean): void {
+    this.setOpen(doorId, open);
+  }
+
   private setOpen(doorId: DoorId, open: boolean): void {
     if (!this.options.house.setDoorOpen(doorId, open)) return;
     const swing = this.swing.get(doorId) ?? { amount: open ? 0 : 1, target: 0 };

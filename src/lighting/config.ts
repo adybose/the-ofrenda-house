@@ -35,6 +35,8 @@ export const LIGHTING = {
     shadowExtent: 14,
     /** Only windows this close to the player light up the house. */
     windowRange: 12,
+    /** Outside (spec 16): light from the sky behind the house, a big shadow box, and a strong sky glow. */
+    outdoor: { intensity: 4, skyGlow: 1.4, shadowExtent: 45, from: [-25, 55, -45] as const, towards: [11, 0, 18] as const },
   },
   candle: { color: 0xffa64a, intensity: 2.2, distance: 6, decay: 2, maxLights: 4, range: 14 },
 } as const;

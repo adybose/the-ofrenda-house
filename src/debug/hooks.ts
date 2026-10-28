@@ -12,7 +12,7 @@ import type { CellId, ChunkDiff, DoorId, Room } from '../world/types';
 import { CELL_SIZE, cellCentre } from '../world/units';
 
 /** Events the hook records for tests. */
-const RECORDED = ['interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning'] as const;
+const RECORDED = ['arrivalStage', 'interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning'] as const;
 
 export type DebugRoomKind = 'filler' | 'key' | 'corridor';
 
@@ -48,6 +48,8 @@ export interface OfrendaDebug {
   masterGain(): number;
   testVoice(seconds: number): void;
   setTension(level: number): void;
+  /** Where the player is in the arrival (spec 16), and whether the outside still exists. */
+  arrival(): { stage: string; exterior: boolean };
   /** Moves to a room of the given kind and frames it for a screenshot. */
   viewRoom(kind: DebugRoomKind): boolean;
   frames(count: number): Promise<void>;
@@ -71,6 +73,7 @@ export function installDebugHooks(options: {
   flashlight: Flashlight;
   lightning: Lightning;
   audio: AudioEngine;
+  arrival(): { stage: string; exterior: boolean };
   renderer: WebGLRenderer;
   lastDrawCalls: () => number;
 }): void {
@@ -176,6 +179,7 @@ export function installDebugHooks(options: {
     masterGain: () => options.audio.levels().master,
     testVoice: (seconds) => options.audio.testVoice(seconds),
     setTension: (level) => options.audio.setTension(level),
+    arrival: () => options.arrival(),
     lightningInfo: () => {
       const light = options.lightning.light;
       return {

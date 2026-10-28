@@ -15,7 +15,7 @@ const CORNERS = {
 } as const satisfies Record<string, [number, number, number, number]>;
 
 test('the flashlight lights the centre of the view and leaves the edges dark; off, the room is near-black', async ({ page, consoleErrors }) => {
-  await boot(page, 'debug=hooks');
+  await boot(page, 'debug=hooks&skip=prologue');
   await page.evaluate(() => window.__ofrenda!.viewRoom('filler'));
   await page.evaluate(() => window.__ofrenda!.frames(3));
 
@@ -44,7 +44,7 @@ test('the flashlight lights the centre of the view and leaves the edges dark; of
 });
 
 test('lightning lights the room through a window and emits a lightning event', async ({ page }) => {
-  await boot(page, 'debug=hooks');
+  await boot(page, 'debug=hooks&skip=prologue');
   await page.evaluate(() => window.__ofrenda!.viewRoom('filler'));
   await page.evaluate(() => window.__ofrenda!.strike({ strength: 1, distanceKm: 0.5 }));
   const events = await page.evaluate(() => window.__ofrenda!.events().filter((e) => e.name === 'lightning'));
