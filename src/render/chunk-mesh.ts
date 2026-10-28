@@ -1,9 +1,9 @@
 import { Group, InstancedMesh, Matrix4, Mesh, type BufferGeometry } from 'three';
-import type { RoomKind as KeyRoomStyle } from '../case/types';
 import { createRng } from '../core/rng';
 import { furnishRoom } from '../world/furniture';
+import { roomSurfaces } from '../world/surfaces';
 import { DIRS, DIR_STEP, FRONT_DOOR_ID, SLOT_CELLS, cellId, edgeCells, parseCell, slotOfCell } from '../world/grid';
-import type { CellId, Chunk, Dir, DoorId, RoomKind } from '../world/types';
+import type { CellId, Chunk, Dir, DoorId } from '../world/types';
 import {
   CELL_SIZE,
   DOOR_HEIGHT,
@@ -28,45 +28,8 @@ import {
   addPortraitFrame,
   addPortraitPicture,
 } from './props';
-import type { TextureKind } from './textures';
 
 const C = CELL_SIZE;
-
-interface Surfaces {
-  walls: readonly TextureKind[];
-  floor: TextureKind;
-  rug?: boolean;
-}
-
-const BY_KIND: Record<Exclude<RoomKind, 'key'>, Surfaces> = {
-  parlour: { walls: ['wallDamask', 'wallFloral', 'wallStripes'], floor: 'parquet', rug: true },
-  bedroom: { walls: ['wallFloral', 'wallStripes', 'wallDamask'], floor: 'floorboards', rug: true },
-  nursery: { walls: ['wallStripes', 'wallFloral'], floor: 'floorboards' },
-  bathroom: { walls: ['wallTiles'], floor: 'floorTiles' },
-  corridor: { walls: ['wallPanelling', 'wallStripes', 'plaster'], floor: 'floorboards' },
-  entranceHall: { walls: ['wallPanelling'], floor: 'floorTiles' },
-  portraitHall: { walls: ['wallDamask'], floor: 'parquet' },
-  act1Corridor: { walls: ['plaster'], floor: 'floorboards' },
-  diningRoom: { walls: ['wallDamask'], floor: 'parquet', rug: true },
-};
-
-const BY_STYLE: Record<KeyRoomStyle, Surfaces> = {
-  study: { walls: ['wallPanelling'], floor: 'parquet', rug: true },
-  studio: { walls: ['plaster'], floor: 'floorboards' },
-  greenhouse: { walls: ['wallTiles'], floor: 'floorTiles' },
-  conservatory: { walls: ['plaster'], floor: 'floorTiles' },
-  library: { walls: ['wallPanelling'], floor: 'parquet', rug: true },
-  countingRoom: { walls: ['wallPanelling'], floor: 'floorboards' },
-  servantsStairs: { walls: ['plaster'], floor: 'floorboards' },
-  linenRoom: { walls: ['plaster'], floor: 'floorboards' },
-  kitchen: { walls: ['wallTiles'], floor: 'floorTiles' },
-  pantry: { walls: ['plaster'], floor: 'stoneFloor' },
-  musicRoom: { walls: ['wallDamask'], floor: 'parquet', rug: true },
-  guestRoom: { walls: ['wallFloral'], floor: 'carpet' },
-  chapel: { walls: ['stone'], floor: 'stoneFloor' },
-  sewingRoom: { walls: ['wallFloral'], floor: 'floorboards' },
-  pottingRoom: { walls: ['plaster'], floor: 'stoneFloor' },
-};
 
 /** What a chunk group remembers about its instanced doors and chandeliers. */
 export interface ChunkMeshData {
@@ -187,7 +150,7 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
 
   for (const room of chunk.rooms) {
     const rng = createRng(textures.seed).fork('surfaces').fork(room.id);
-    const surfaces = room.kind === 'key' && room.style ? BY_STYLE[room.style] : BY_KIND[room.kind as Exclude<RoomKind, 'key'>];
+    const surfaces = roomSurfaces(room);
     const wallRect = textures.uv(rng.pick(surfaces.walls));
     const floorRect = textures.uv(surfaces.floor);
     const tint: Tint = [0.9 + rng.float() * 0.1, 0.88 + rng.float() * 0.1, 0.86 + rng.float() * 0.1];

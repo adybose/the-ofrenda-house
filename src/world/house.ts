@@ -40,6 +40,8 @@ export interface House {
   update(playerCell: CellId): ChunkDiff;
   reshuffle(visible: ReadonlySet<CellId>, playerCell: CellId): ChunkDiff;
   unlock(doorId: DoorId): void;
+  /** Opens or closes an ordinary door. Returns false for locked or sealed doors. */
+  setDoorOpen(doorId: DoorId, open: boolean): boolean;
   pinCells(cells: readonly CellId[]): void;
   shiftCorridorBehind(): ChunkDiff;
   endAct1(): void;
@@ -482,6 +484,13 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       const keyRoom = keyRooms.find((k) => k.doorId === doorId);
       if (keyRoom) keyRoom.locked = false;
       if (findDoor(doorId)?.state === 'locked') setDoorState(doorId, 'closed');
+    },
+
+    setDoorOpen(doorId, open) {
+      const state = findDoor(doorId)?.state;
+      if (state !== 'open' && state !== 'closed') return false;
+      setDoorState(doorId, open ? 'open' : 'closed');
+      return true;
     },
 
     pinCells(cells) {
