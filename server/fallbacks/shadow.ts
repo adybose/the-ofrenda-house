@@ -1,0 +1,25 @@
+/** La Sombra's taunts and whispers, at most 12 words each. */
+export const SHADOW_TAUNTS: readonly string[] = [
+  "Run, little thief. The house has no doors for you.",
+  "I can hear your heart. It is so loud.",
+  "Every room you enter, I was there first.",
+  "They will hang your face on the wall.",
+  "The candle is burning down. Can you feel it?",
+  "You smell of rain and fear.",
+  "Keep running. I like it when they run.",
+  "Your flashlight will die before you do.",
+  "They poisoned me too, you know. Slowly.",
+  "Come down to the cellar. It is quiet there.",
+  "Turn around. No. Too late.",
+  "The dead lie to you. Only I tell the truth.",
+  "You will stay. They all stay.",
+  "I am in the walls. I am in the floor.",
+  "The marigolds will not save you forever.",
+  "Dawn will not come for you.",
+  "Whose blood do you think you have?",
+  "Closer. Closer. Almost.",
+  "The house is hungry tonight.",
+  "Do not trust the ones who smile.",
+  "I hear you breathing behind the door.",
+  "Every step creaks. I hear them all."
+];
