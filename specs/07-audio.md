@@ -24,7 +24,7 @@ The storm and the house sound real and close, all synthesised with the Web Audio
 audio.unlock(): Promise<void>; audio.state   // 'none' until the first gesture
 audio.play(name: SoundName, opts?: { position?: Vec3; gain?: number; param?: number; delay?: number }): void
 audio.setTension(level: number); audio.setRoomSize(size: 'small' | 'medium' | 'large')
-audio.setWindowDistance(metres: number); audio.setListener(position, forward); audio.update()   // once a frame
+audio.setWindowDistance(metres: number); audio.setOutdoors(on: boolean); audio.setListener(position, forward); audio.update()   // once a frame
 audio.voiceBus: AudioNode; audio.renderOffline(name, seconds, param?): Promise<Float32Array>   // tests
 // src/audio/synths.ts: SYNTHS, SOUND_NAMES, SoundName
 // rain, wind, thunder (param: closeness 0..1), creak, slam, lock, unlock, footstepWood, footstepTile,
@@ -33,7 +33,7 @@ audio.voiceBus: AudioNode; audio.renderOffline(name, seconds, param?): Promise<F
 // src/audio/game-audio.ts: connectGameAudio(audio, house) wires game events to sounds
 thunderDelay(distanceKm: number): number          // src/audio/thunder.ts (pure)
 generateImpulse(size, sampleRate, rng)            // src/audio/impulse.ts (pure)
-whiteNoise / pinkNoise / brownNoise(rng, length)  // src/audio/noise.ts (pure)
+whiteNoise / pinkNoise / brownNoise(rng, length), rainGrains(rng, rate, seconds)  // src/audio/noise.ts (pure)
 OneShotPool(cap)                                  // src/audio/pool.ts (pure)
 ```
 
@@ -63,7 +63,9 @@ Vitest: thunder delay, impulse responses. Playwright: offline renders of each so
 
 ## Decisions
 - Nothing audio exists until the first click or key press (`connectGameAudio` listens for it); spec 14's title-screen click will be that gesture.
-- Rain and wind loop indefinitely at no ongoing cost: rain is pink hiss plus a pre-rendered 6 s loop of droplets, wind is brown noise through a band-pass whose frequency and level drift on slow oscillators. The rain's level also swells and fades on a seeded random path. (A first version scheduled every raindrop for hours ahead and stalled unlocking for over 10 s.)
+- Rain and wind loop indefinitely at no ongoing cost. Rain is three noise layers: a broadband roar, a low body (rain on roof and ground) and an 8 s loop of drop impacts from `rainGrains` (white-noise grains with sharp decays and random brightness, plus heavier splats). Wind is brown noise through a band-pass whose frequency and level drift on slow oscillators. The rain's level swells and fades on a seeded random path. (A first version scheduled every raindrop for hours ahead and stalled unlocking for over 10 s; a second rendered drops as sine pings, which rang like wind chimes. A unit test now checks the drops' loudest moments are noise, not tones: spectral flatness 0.49 against 0.003 for the old pings.)
+- Thunder has a sub-bass boom (42 to 24 Hz) under the crack and the rolling rumble, and far strikes rumble for up to 8 s.
+- `setOutdoors(true)` opens the muffle filter fully and makes the rain 60% louder: the storm outside the mansion (spec 16).
 - Thunder plays on the ambience bus (so it is muffled deep inside the house), after `thunderDelay(distanceKm)`, with closeness taken from the strike's strength. The muffling low-pass runs from about 7.6 kHz beside a window down to 600 Hz far from any, from the nearest exterior window.
 - Routing: footsteps, doors, keys and the torch go to the effects bus (with room reverb); door sounds are placed at the door with HRTF panners; stingers go to their own dry bus; the master has a limiter. Closing a door plays the slam at half level; a sealed door rattles and thuds; trying a locked door plays `lock`; unlocking plays `unlock`.
 - Ducking is automatic: the voice bus is metered every frame and the ambience drops to 35% while anything plays on it, so spec 09 only has to connect to `voiceBus`.

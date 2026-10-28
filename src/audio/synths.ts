@@ -1,5 +1,5 @@
 import { createRng, type Rng } from '../core/rng';
-import { brownNoise, pinkNoise, whiteNoise } from './noise';
+import { brownNoise, pinkNoise, rainGrains, whiteNoise } from './noise';
 
 // Every sound in the game, synthesised from oscillators, noise and filters. Each synth builds
 // its nodes on any context (live or offline), connects them to `out`, starts at `t`, and returns
@@ -105,29 +105,16 @@ function tone(s: SynthContext, at: number, from: number, to: number, peak: numbe
   return osc;
 }
 
-const dropletCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+const grainCache = new WeakMap<BaseAudioContext, AudioBuffer>();
 
-/** A 6 s loop of raindrops tapping glass and roof: short, bright, decaying pings at random. */
-function droplets(ctx: BaseAudioContext): AudioBuffer {
-  let buffer = dropletCache.get(ctx);
+/** An 8 s loop of raindrop impacts (see `rainGrains`): unpitched, so nothing rings like a chime. */
+function grains(ctx: BaseAudioContext): AudioBuffer {
+  let buffer = grainCache.get(ctx);
   if (!buffer) {
-    const rng = createRng(21);
-    const length = Math.floor(ctx.sampleRate * 6);
-    const data = new Float32Array(length);
-    for (let drop = 0; drop < 420; drop++) {
-      const start = rng.int(0, length - 1);
-      const frequency = 1500 + rng.float() * 4500;
-      const decay = 0.004 + rng.float() * 0.012;
-      const amplitude = 0.08 + rng.float() * 0.3;
-      const end = Math.min(length, start + Math.floor(ctx.sampleRate * decay * 5));
-      for (let i = start; i < end; i++) {
-        const t = (i - start) / ctx.sampleRate;
-        data[i] = Math.max(-1, Math.min(1, data[i]! + amplitude * Math.exp(-t / decay) * Math.sin(2 * Math.PI * frequency * t)));
-      }
-    }
-    buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = rainGrains(createRng(21), ctx.sampleRate, 8);
+    buffer = ctx.createBuffer(1, data.length, ctx.sampleRate);
     buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
-    dropletCache.set(ctx, buffer);
+    grainCache.set(ctx, buffer);
   }
   return buffer;
 }
@@ -146,20 +133,31 @@ function drift(s: SynthContext, target: AudioParam, frequency: number, depth: nu
 // ---- Ambience ----
 // Both loop indefinitely at no ongoing cost: no per-drop or per-gust scheduling.
 
+/** Heavy rain: a broadband roar, a low body (rain on roof and ground), and a loop of drop impacts. */
 export function rain(s: SynthContext): number {
   const until = s.t + s.seconds;
-  const hiss = noise(s, 'pink', true);
-  const body = filter(s, 'bandpass', 1800, 0.4);
-  const hissGain = gain(s, 0.45);
-  chain(hiss, body, hissGain, s.out);
-  startNoise(hiss, s, s.t, s.seconds);
-  const patter = s.ctx.createBufferSource();
-  patter.buffer = droplets(s.ctx);
-  patter.loop = true;
-  const patterGain = gain(s, 0.5);
-  chain(patter, patterGain, s.out);
-  patter.start(s.t, s.rng.float() * 5);
-  patter.stop(until);
+  const roar = noise(s, 'white', true);
+  const air = filter(s, 'highpass', 500);
+  const presence = filter(s, 'peaking', 3500, 0.8);
+  presence.gain.value = 3;
+  const top = filter(s, 'lowpass', 9000);
+  const roarGain = gain(s, 0.16);
+  chain(roar, air, presence, top, roarGain, s.out);
+  startNoise(roar, s, s.t, s.seconds);
+
+  const body = noise(s, 'pink', true);
+  const low = filter(s, 'lowpass', 1200);
+  const bodyGain = gain(s, 0.35);
+  chain(body, low, bodyGain, s.out);
+  startNoise(body, s, s.t, s.seconds);
+
+  const drops = s.ctx.createBufferSource();
+  drops.buffer = grains(s.ctx);
+  drops.loop = true;
+  const dropsGain = gain(s, 0.55);
+  chain(drops, dropsGain, s.out);
+  drops.start(s.t, s.rng.float() * 7);
+  drops.stop(until);
   return s.seconds;
 }
 
@@ -181,19 +179,21 @@ export function wind(s: SynthContext): number {
 /** Thunder: param is closeness, 0 (far, a low grumble) to 1 (overhead, a sharp crack). */
 export function thunder(s: SynthContext): number {
   const close = Math.min(1, Math.max(0, s.param || 0.6));
-  const length = 3.5 + (1 - close) * 2.5;
-  if (close > 0.35) burst(s, s.t, 'white', 'highpass', 1200, 0.3 * close, 0.25 + close * 0.2);
+  const length = 4 + (1 - close) * 4;
+  if (close > 0.35) burst(s, s.t, 'white', 'highpass', 1200, 0.25 * close, 0.25 + close * 0.2);
+  // The boom you feel more than hear.
+  tone(s, s.t + 0.05 + (1 - close) * 0.3, 42, 24, 0.3 + 0.15 * close, 0.06, 2.5);
   const rumble = noise(s, 'brown', true);
   const low = filter(s, 'lowpass', 140 + close * 360, 0.9);
   const g = gain(s, 0.0001);
   chain(rumble, low, g, s.out);
   startNoise(rumble, s, s.t, length);
   g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(0.5, s.t + 0.08 + (1 - close) * 0.5);
+  g.gain.exponentialRampToValueAtTime(0.42, s.t + 0.08 + (1 - close) * 0.5);
   // Rolling: a few lurches as the sound arrives from different parts of the strike.
   let at = s.t + 0.4;
   while (at < s.t + length - 0.8) {
-    g.gain.linearRampToValueAtTime(0.2 + s.rng.float() * 0.35, at);
+    g.gain.linearRampToValueAtTime(0.15 + s.rng.float() * 0.27, at);
     at += 0.25 + s.rng.float() * 0.6;
   }
   g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);

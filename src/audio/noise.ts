@@ -35,3 +35,31 @@ export function brownNoise(rng: Rng, length: number): Float32Array {
   }
   return out;
 }
+
+/**
+ * Raindrops as a loop: dense, unpitched impacts. Each is a few milliseconds of white noise with
+ * a sharp decay and its own brightness (a one-pole low-pass), plus the occasional heavier splat.
+ * No sines anywhere, so nothing rings like a chime.
+ */
+export function rainGrains(rng: Rng, sampleRate: number, seconds: number): Float32Array {
+  const length = Math.floor(sampleRate * seconds);
+  const out = new Float32Array(length);
+  const drops = Math.floor(190 * seconds);
+  for (let d = 0; d < drops; d++) {
+    const splat = rng.chance(0.04);
+    const start = rng.int(0, length - 1);
+    const decay = splat ? 0.008 + rng.float() * 0.01 : 0.001 + rng.float() * 0.005;
+    const amplitude = splat ? 0.35 + rng.float() * 0.3 : 0.05 + rng.float() * 0.25;
+    // 0 = bright tick on glass, near 1 = dull thud on wood and earth.
+    const dullness = splat ? 0.6 + rng.float() * 0.3 : rng.float() * 0.75;
+    const end = Math.min(length, start + Math.floor(sampleRate * decay * 6));
+    let smooth = 0;
+    for (let i = start; i < end; i++) {
+      const t = (i - start) / sampleRate;
+      smooth = smooth * dullness + (rng.float() * 2 - 1) * (1 - dullness);
+      out[i] = out[i]! + amplitude * Math.exp(-t / decay) * smooth * (1 + dullness * 2);
+    }
+  }
+  for (let i = 0; i < length; i++) out[i] = Math.max(-1, Math.min(1, out[i]!));
+  return out;
+}

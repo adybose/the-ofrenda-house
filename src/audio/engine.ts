@@ -51,6 +51,8 @@ export class AudioEngine {
   private rainTarget = 1;
   private rainChangeAt = 0;
   private plays = 0;
+  private outdoors = false;
+  private windowDistance = 30;
 
   constructor(private readonly options: { seed: number; muted: boolean }) {
     this.rng = createRng(options.seed).fork('audio');
@@ -111,6 +113,8 @@ export class AudioEngine {
     this.muffle = ctx.createBiquadFilter();
     this.muffle.type = 'lowpass';
     this.muffle.frequency.value = 2000;
+    // The outdoors flag may have been set before the first gesture built the graph.
+    queueMicrotask(() => this.applyMuffle());
     this.ambience = ctx.createGain();
     this.muffle.connect(this.ambience).connect(this.master);
 
@@ -194,8 +198,20 @@ export class AudioEngine {
 
   /** Metres to the nearest window: close, the storm is clear; deep inside, it's a low murmur. */
   setWindowDistance(metres: number): void {
+    this.windowDistance = metres;
+    this.applyMuffle();
+  }
+
+  /** Outside, the storm is open and heavy: no muffling, and the rain louder. */
+  setOutdoors(on: boolean): void {
+    this.outdoors = on;
+    this.rainChangeAt = 0;
+    this.applyMuffle();
+  }
+
+  private applyMuffle(): void {
     if (!this.ctx) return;
-    const cutoff = 600 + 7000 * Math.exp(-metres / 4);
+    const cutoff = this.outdoors ? 14_000 : 600 + 7000 * Math.exp(-this.windowDistance / 4);
     this.muffle.frequency.setTargetAtTime(cutoff, this.ctx.currentTime, 0.4);
   }
 
@@ -221,7 +237,7 @@ export class AudioEngine {
     const now = ctx.currentTime;
 
     if (now >= this.rainChangeAt) {
-      this.rainTarget = 0.5 + this.rng.float() * 0.5;
+      this.rainTarget = (0.5 + this.rng.float() * 0.5) * (this.outdoors ? 1.6 : 1);
       this.rainChangeAt = now + 3 + this.rng.float() * 6;
       this.rainLevel.gain.setTargetAtTime(this.rainTarget, now, 2);
     }
