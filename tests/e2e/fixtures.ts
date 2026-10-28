@@ -35,3 +35,48 @@ export const test = base.extend<Fixtures>({
 });
 
 export { expect };
+
+/** Brightness statistics (0-255, mean of RGB) for a screenshot, over the whole frame or a region in 0..1 coordinates. */
+export interface Stats {
+  mean: number;
+  p99: number;
+  max: number;
+}
+
+export async function imageStats(
+  page: import('@playwright/test').Page,
+  png: Buffer,
+  regions: Record<string, [number, number, number, number]> = { all: [0, 0, 1, 1] },
+): Promise<Record<string, Stats>> {
+  return page.evaluate(
+    async ({ base64, regions }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      const result: Record<string, { mean: number; p99: number; max: number }> = {};
+      for (const [name, [x0, y0, x1, y1]] of Object.entries(regions)) {
+        const left = Math.floor(x0 * image.width);
+        const top = Math.floor(y0 * image.height);
+        const { data } = ctx.getImageData(left, top, Math.max(1, Math.floor((x1 - x0) * image.width)), Math.max(1, Math.floor((y1 - y0) * image.height)));
+        const values: number[] = [];
+        for (let i = 0; i < data.length; i += 4) values.push((data[i]! + data[i + 1]! + data[i + 2]!) / 3);
+        values.sort((a, b) => a - b);
+        result[name] = {
+          mean: values.reduce((a, b) => a + b, 0) / values.length,
+          p99: values[Math.floor(values.length * 0.99)] ?? 0,
+          max: values.at(-1) ?? 0,
+        };
+      }
+      return result;
+    },
+    { base64: png.toString('base64'), regions },
+  );
+}
+
+/** The house at night: ambient light is near-black, not zero, so "dark" means this or darker. */
+export const NEAR_BLACK = { mean: 6, p99: 40 };

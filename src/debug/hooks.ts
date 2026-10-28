@@ -1,5 +1,7 @@
 import type { WebGLRenderer } from 'three';
 import { events, type GameEvents } from '../core/events';
+import type { Flashlight } from '../lighting/flashlight';
+import type { Lightning, StrikeOptions } from '../lighting/lightning';
 import type { PlayerController } from '../player/controller';
 import type { PlayerState } from '../player/movement';
 import { DIRS, DIR_STEP, SLOT_CELLS, parseCell, slotOfCell } from '../world/grid';
@@ -8,7 +10,7 @@ import type { CellId, ChunkDiff, DoorId, Room } from '../world/types';
 import { CELL_SIZE, cellCentre } from '../world/units';
 
 /** Events the hook records for tests. */
-const RECORDED = ['interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged'] as const;
+const RECORDED = ['interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning'] as const;
 
 export type DebugRoomKind = 'filler' | 'key' | 'corridor';
 
@@ -29,6 +31,13 @@ export interface OfrendaDebug {
   /** Recorded game events, oldest first. */
   events(): ({ name: string } & Record<string, unknown>)[];
   giveKey(keyId: string): void;
+  flashlight(): { on: boolean; level: number };
+  /** A lightning strike now. */
+  strike(options?: StrikeOptions): void;
+  /** Holds a lightning flash at a level through the nearest window (undefined lets go), for screenshots. */
+  holdLightning(level: number | undefined): void;
+  /** Where the lightning light is and which window it uses. */
+  lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   /** Moves to a room of the given kind and frames it for a screenshot. */
   viewRoom(kind: DebugRoomKind): boolean;
   frames(count: number): Promise<void>;
@@ -49,6 +58,8 @@ export function installDebugHooks(options: {
   player: PlayerController;
   prompt: { text(): string };
   keys: Set<string>;
+  flashlight: Flashlight;
+  lightning: Lightning;
   renderer: WebGLRenderer;
   lastDrawCalls: () => number;
 }): void {
@@ -130,6 +141,19 @@ export function installDebugHooks(options: {
     prompt: () => options.prompt.text(),
     events: () => [...log],
     giveKey: (keyId) => options.keys.add(keyId),
+    flashlight: () => ({ on: options.flashlight.on, level: options.flashlight.level }),
+    strike: (strikeOptions) => void options.lightning.strike(strikeOptions),
+    holdLightning: (level) => options.lightning.hold(level, { yaw: 0.2 }),
+    lightningInfo: () => {
+      const light = options.lightning.light;
+      return {
+        window: light.userData.window,
+        position: light.position.toArray(),
+        target: light.target.position.toArray(),
+        visible: light.visible,
+        intensity: light.intensity,
+      };
+    },
     memory: () => ({ geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures }),
     drawCalls: options.lastDrawCalls,
   };

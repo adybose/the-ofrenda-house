@@ -1,4 +1,4 @@
-import { DataTexture, MeshLambertMaterial, NearestFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
+import { DataTexture, MeshBasicMaterial, MeshLambertMaterial, NearestFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
 import type { CaseFile, CharacterId } from '../case/types';
 import { createRng, STREAMS } from '../core/rng';
 import type { PixelImage } from './pixels';
@@ -23,6 +23,8 @@ export interface TextureCache {
   material: MeshLambertMaterial;
   portraitAtlas: DataTexture;
   portraitMaterial: MeshLambertMaterial;
+  /** Window glass: unlit night sky, brightened by lightning (spec 06). */
+  glassMaterial: MeshBasicMaterial;
   uv(kind: TextureKind): UvRect;
   portraitUv(key: PortraitKey): UvRect;
   dispose(): void;
@@ -102,6 +104,7 @@ export function createTextureCache(seed: number, caseFile: CaseFile): TextureCac
 
   const material = new MeshLambertMaterial({ map: atlas, vertexColors: true });
   const portraitMaterial = new MeshLambertMaterial({ map: portraitAtlas, vertexColors: true });
+  const glassMaterial = new MeshBasicMaterial({ map: atlas });
 
   return {
     seed,
@@ -109,6 +112,7 @@ export function createTextureCache(seed: number, caseFile: CaseFile): TextureCac
     material,
     portraitAtlas,
     portraitMaterial,
+    glassMaterial,
     uv: (kind) => rects.get(kind)!,
     portraitUv: (key) => portraitRects.get(key) ?? portraitRects.get('empty')!,
     dispose() {
@@ -116,6 +120,7 @@ export function createTextureCache(seed: number, caseFile: CaseFile): TextureCac
       portraitAtlas.dispose();
       material.dispose();
       portraitMaterial.dispose();
+      glassMaterial.dispose();
     },
   };
 }
