@@ -1,5 +1,5 @@
 # 05: Player controller
-Status: Approved
+Status: Done
 Depends on: 04
 
 ## Goal
@@ -19,10 +19,21 @@ The player walks the house in first person with the controls from `docs/story.md
 
 ## Interfaces
 ```ts
+// src/player/movement.ts (pure)
 stepPlayer(state: PlayerState, input: InputState, dt: number, walls: CollisionMap): PlayerState
-registerInteractable(i: { id; position; kind: 'door' | 'object' | 'spirit' | 'portrait'; label; onInteract }): () => void
-setControlsEnabled(enabled: boolean): void
-events: playerCellChanged, footstep { surface, running }, interact { id }, doorLocked, doorSealed, doorOpened
+PLAYER  // radius 0.3, walk 1.4 m/s, run × 1.8, turn 2.2 rad/s, pitch ±80°, 5 cm sub-steps
+// src/world/collision.ts (pure): walls, door jambs, closed door panels and furniture as boxes
+createCollisionMap(house, seed): CollisionMap
+// src/player/interaction.ts
+interactions.register({ id, x, z, kind: 'door' | 'object' | 'spirit' | 'portrait', label, onInteract }): () => void
+pickInteractable(viewer, items)  // nearest within 1.5 m and 45°
+// src/player/controller.ts
+player.setControlsEnabled(enabled: boolean); player.teleport(x, z, yaw); player.state()
+// src/player/doors.ts: registers every loaded door, handles E, animates the swing
+house.setDoorOpen(doorId, open): boolean   // added to spec 03's house
+footstepSurface(room, cell): 'wood' | 'tile' | 'carpet' | 'stone'   // src/world/surfaces.ts
+events: playerCellChanged { cell }, footstep { surface, running }, interact { id },
+        doorOpened, doorClosed, doorUnlocked, doorLocked, doorSealed { doorId }
 ```
 
 ## Out of scope
@@ -30,14 +41,23 @@ F for the flashlight (06), Q for petals (12), J for the journal (10), 1 to 4 for
 
 ## Acceptance checks
 Must:
-- [ ] Unit: the player cannot pass through a wall at walk or run speed for any frame time up to 100 ms, and slides along a wall when walking into it at an angle.
-- [ ] Unit: turning rate and walk and run speeds match the configured constants.
-- [ ] Playwright: holding ArrowUp for 1 s moves the camera forward and ArrowLeft turns it; before and after screenshots saved.
-- [ ] Playwright: E on a nearby unlocked door opens it; on a locked door emits `doorLocked`.
-- [ ] Playwright: with controls disabled, arrow keys do not move the camera.
+- [x] Unit: the player cannot pass through a wall at walk or run speed for any frame time up to 100 ms, and slides along a wall when walking into it at an angle.
+- [x] Unit: turning rate and walk and run speeds match the configured constants.
+- [x] Playwright: holding ArrowUp for 1 s moves the camera forward and ArrowLeft turns it; before and after screenshots saved.
+- [x] Playwright: E on a nearby unlocked door opens it; on a locked door emits `doorLocked`.
+- [x] Playwright: with controls disabled, arrow keys do not move the camera.
 Should:
-- [ ] Page Up and Page Down change pitch within the clamp.
-- [ ] The "E" prompt appears only when an interactable is in range and in view.
+- [x] Page Up and Page Down change pitch within the clamp.
+- [x] The "E" prompt appears only when an interactable is in range and in view.
 
 ## Test plan
 Vitest: `stepPlayer` collision and speed tests, interaction target selection. Playwright: movement, turning, doors, disabled controls.
+
+## Decisions
+- Collision is circle against boxes: each cell side that leads out of the room is a 20 cm wall slab on the boundary; doorways keep jambs either side of the 1 m opening, plus a panel across it unless the door is open. Closed doors block; E opens them. Furniture uses the same footprints the renderer draws. Movement is split into 5 cm steps (radius 0.3 m), so no frame up to 100 ms can skip a wall.
+- Door states change at once in the house (so collision clears straight away); the panel then swings over 0.6 s.
+- Locked doors open with E only if the player holds their key (`keys` set in main; spec 11 hands keys out). The front door and the Act 1 exit report `doorSealed`.
+- Footsteps fire every 0.75 m walking or 1.0 m running, only for distance actually covered, with the surface from the room's floor (rugs count as carpet). Spec 07 plays them.
+- The room surface tables moved from `src/render/chunk-mesh.ts` to `src/world/surfaces.ts`, so footsteps and rendering agree.
+- `?skip=act1` starts at the end of the Act 1 corridor with the exit unsealed (closed, opened with E). Spec 14 takes this flag over.
+- Debug hooks gained `player()`, `setControlsEnabled`, `standFacingDoor`, `prompt()`, `events()` and `giveKey` for Playwright.
