@@ -33,7 +33,7 @@ export function connectGameAudio(audio: AudioEngine, house: House, startCell?: C
 
   events.on('footstep', ({ surface, running }) => audio.play(FOOTSTEPS[surface] ?? 'footstepWood', { gain: running ? 1.2 : 0.9 }));
   events.on('doorOpened', ({ doorId }) => audio.play('creak', { position: atDoor(doorId) }));
-  events.on('doorClosed', ({ doorId }) => audio.play('slam', { position: atDoor(doorId), gain: 1 }));
+  events.on('doorClosed', ({ doorId }) => audio.play('slam', { position: atDoor(doorId), gain: 1.4 }));
   events.on('doorUnlocked', ({ doorId }) => audio.play('unlock', { position: atDoor(doorId) }));
   events.on('doorLocked', ({ doorId }) => audio.play('lock', { position: atDoor(doorId) }));
   events.on('doorSealed', ({ doorId }) => {

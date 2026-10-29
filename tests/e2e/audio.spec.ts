@@ -4,7 +4,7 @@ test('every named sound renders offline: not silent, no NaN, peak at or below 1.
   await page.goto('/?seed=42&debug=hooks&mute=1');
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
   const names = await page.evaluate(() => window.__ofrenda!.soundNames());
-  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'clockTick', 'splat', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'heartbeat']) {
+  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'clockTick', 'splat', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'catScream', 'heartbeat']) {
     expect(names).toContain(sound);
   }
   for (const name of names) {
@@ -83,5 +83,19 @@ test('the rain stands well above the wind, overhead thunder opens with a loud cr
   // The first half second of a close strike: was 0.31 when it opened with a faint clap.
   const overhead = await render('thunder', 0.95);
   expect(overhead.onsetRms).toBeGreaterThan(0.45);
-  expect((await render('stinger')).audibleFor).toBeGreaterThan(4);
+  const stinger = await render('stinger');
+  expect(stinger.audibleFor).toBeGreaterThan(2.8);
+  expect(stinger.audibleFor).toBeLessThan(4);
+});
+
+test('overhead thunder fades gradually and long; the slam is a heavy thud', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  const thunder = await page.evaluate(() => window.__ofrenda!.renderSound('thunder', 0.95));
+  expect(thunder.audibleFor).toBeGreaterThan(6);
+  // Half-second windows from 0.5 s to 6 s: none falls under 40% of the one before.
+  const fall = thunder.windows.slice(1, 12);
+  for (let i = 1; i < fall.length; i++) expect(fall[i]!, `window ${i + 1}`).toBeGreaterThan(fall[i - 1]! * 0.4);
+  // Was 0.085.
+  expect((await page.evaluate(() => window.__ofrenda!.renderSound('slam'))).rms).toBeGreaterThan(0.12);
 });

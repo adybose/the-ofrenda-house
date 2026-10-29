@@ -42,8 +42,8 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second. */
-  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; onsetRms: number; audibleFor: number; hasNaN: boolean; seconds: number }>;
+  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second. */
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
@@ -166,7 +166,7 @@ export function installDebugHooks(options: {
     soundNames: () => [...SOUND_NAMES],
     async renderSound(name, chosen) {
       // Long enough for each sound's tail; by default thunder close, the clock striking three.
-      const seconds = name === 'thunder' ? 9 : name === 'clock' ? 8 : name === 'stinger' ? 7 : name === 'whisper' ? 4 : 3;
+      const seconds = name === 'thunder' ? 10 : name === 'clock' ? 8 : name === 'stinger' ? 7 : name === 'whisper' ? 4 : 3;
       const param = chosen ?? (name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0);
       const samples = await options.audio.renderOffline(name, seconds, param);
       // Interleaved stereo at 44.1 kHz.
@@ -176,15 +176,17 @@ export function installDebugHooks(options: {
       let onsetSum = 0;
       let last = 0;
       let hasNaN = false;
+      const windows = new Array<number>(Math.ceil(samples.length / onset)).fill(0);
       for (let i = 0; i < samples.length; i++) {
         const v = samples[i]!;
         if (Number.isNaN(v)) hasNaN = true;
         peak = Math.max(peak, Math.abs(v));
         sum += v * v;
         if (i < onset) onsetSum += v * v;
+        windows[Math.floor(i / onset)]! += v * v;
         if (Math.abs(v) > 0.005) last = i;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), audibleFor: last / 2 / 44_100, hasNaN, seconds };
+      return { peak, rms: Math.sqrt(sum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
     },
     audioState: () => options.audio.state,
     ambienceGain: () => options.audio.levels().ambience,

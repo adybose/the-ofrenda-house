@@ -25,6 +25,13 @@ describe('stick-slip friction', () => {
     expect(times.length).toBeLessThan(400);
   });
 
+  it('creaks more smoothly with a narrower jitter', () => {
+    const gaps = (times: number[]) => times.slice(1).map((t, i) => t - times[i]!);
+    const rough = spread(gaps(slipTimes(createRng(5), 1, () => 200)));
+    const smooth = spread(gaps(slipTimes(createRng(5), 1, () => 200, 1.25)));
+    expect(smooth).toBeLessThan(rough / 2.5);
+  });
+
   it('slows down when the rate falls: a squeal opening out into separate cracks', () => {
     const times = slipTimes(createRng(6), 1.2, (t) => 400 * (30 / 400) ** (t / 1.2));
     const early = times.filter((t) => t < 0.3).length;
@@ -64,6 +71,8 @@ describe('whisper score', () => {
         if (s.onset) expect(Object.keys(WHISPER_ONSETS)).toContain(s.onset);
       }
       expect(score.some((s) => s.onset === 's' || s.onset === 'sh'), `seed ${seed}`).toBe(true);
+      // Only soft, hushing consonants: no t or k to make it sound like words.
+      for (const s of score) if (s.onset) expect(['sh', 'h', 's', 'f']).toContain(s.onset);
       expect(new Set(score.map((s) => s.vowel)).size, `seed ${seed}`).toBeGreaterThan(1);
     }
   });

@@ -1,7 +1,7 @@
 import type { AudioEngine } from '../audio/engine';
 import { SOUND_NAMES, type SoundName } from '../audio/synths';
 
-const CHECKLIST = ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'footsteps', 'heartbeat', 'stingers', 'whispers', 'bat', 'rat', 'cat', 'clock'];
+const CHECKLIST = ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'footsteps', 'heartbeat', 'stingers', 'whispers', 'bat', 'rat', 'cat', 'cat scream', 'clock'];
 
 /** `?debug=soundboard`: a button for every sound, plus tension and room size, for the listening check. */
 export function showSoundboard(audio: AudioEngine): void {
