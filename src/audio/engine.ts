@@ -1,6 +1,7 @@
 import { createRng, type Rng } from '../core/rng';
 import type { SizeClass } from '../world/types';
 import { generateImpulse } from './impulse';
+import { WHISPER_VARIANTS, pickVariant } from './noise';
 import { OneShotPool } from './pool';
 import { SYNTHS, type SoundName } from './synths';
 
@@ -68,6 +69,7 @@ export class AudioEngine {
   private clock: Vec3 | undefined;
   private nextTick = 0;
   private tock = false;
+  private lastWhisper: number | undefined;
 
   constructor(private readonly options: { seed: number; muted: boolean }) {
     this.rng = createRng(options.seed).fork('audio');
@@ -194,7 +196,8 @@ export class AudioEngine {
     } else {
       level.connect(bus);
     }
-    const duration = SYNTHS[name]({ ctx, out: level, t: at, param: options.param ?? 0, seconds: 3, rng: this.rng.fork(`play:${this.plays++}`) });
+    const param = options.param ?? (name === 'whisper' ? this.nextWhisper() : 0);
+    const duration = SYNTHS[name]({ ctx, out: level, t: at, param, seconds: 3, rng: this.rng.fork(`play:${this.plays++}`) });
     // Stopping a one-shot early: fade it out fast and cut it loose.
     const handle = {
       stop: () => {
@@ -246,6 +249,12 @@ export class AudioEngine {
     this.storm.gain.setTargetAtTime(storm, now, 0.4);
     this.thunderMuffle.frequency.setTargetAtTime(this.outdoors ? 14_000 : 1200 + 3000 * near, now, 0.4);
     this.thunderLevel.gain.setTargetAtTime(this.outdoors ? THUNDER.outdoors : THUNDER.indoors, now, 0.4);
+  }
+
+  /** Which whisper to play next: any version but the last one. */
+  private nextWhisper(): number {
+    this.lastWhisper = pickVariant(this.rng, WHISPER_VARIANTS.length, this.lastWhisper);
+    return this.lastWhisper;
   }
 
   /** A clock to tick at this position while the player is in its room; undefined stops it. */

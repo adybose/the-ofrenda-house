@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../src/core/rng';
-import { WHISPER_ONSETS, WHISPER_VOWELS, slipTimes, stickSlip, whisperScore } from '../../src/audio/noise';
+import { WHISPER_ONSETS, WHISPER_VARIANTS, WHISPER_VOWELS, pickVariant, slipTimes, stickSlip, whisperScore } from '../../src/audio/noise';
 
 const RATE = 44_100;
 
@@ -58,13 +58,13 @@ describe('whisper score', () => {
     expect(whisperScore(createRng(9), 2)).toEqual(whisperScore(createRng(9), 2));
   });
 
-  it('speaks at a human pace, with sibilants and vowels, and fits its length', () => {
+  it('speaks slowly, with sibilants and vowels, and fits its length', () => {
     for (let seed = 1; seed <= 8; seed++) {
-      const seconds = 2.2;
+      const seconds = 2.8;
       const score = whisperScore(createRng(seed), seconds);
       const perSecond = score.length / seconds;
-      expect(perSecond, `seed ${seed}`).toBeGreaterThanOrEqual(3);
-      expect(perSecond, `seed ${seed}`).toBeLessThanOrEqual(6);
+      expect(perSecond, `seed ${seed}`).toBeGreaterThanOrEqual(2);
+      expect(perSecond, `seed ${seed}`).toBeLessThanOrEqual(3.5);
       for (const s of score) {
         expect(s.start + s.onsetLength + s.vowelLength).toBeLessThanOrEqual(seconds);
         expect(Object.keys(WHISPER_VOWELS)).toContain(s.vowel);
@@ -78,9 +78,39 @@ describe('whisper score', () => {
   });
 
   it('swells in the middle of the phrase', () => {
-    const score = whisperScore(createRng(4), 2.4);
-    const mid = Math.max(...score.filter((s) => s.start > 0.6 && s.start < 1.8).map((s) => s.level));
+    const score = whisperScore(createRng(4), 3);
+    const mid = Math.max(...score.filter((s) => s.start > 0.7 && s.start < 2.2).map((s) => s.level));
     expect(mid).toBeGreaterThan(score[0]!.level);
     expect(mid).toBeGreaterThan(score.at(-1)!.level);
+  });
+});
+
+describe('whisper versions', () => {
+  it('are six different phrases, each fitting its length', () => {
+    expect(WHISPER_VARIANTS).toHaveLength(6);
+    const scores = WHISPER_VARIANTS.map((v) => whisperScore(createRng(v.seed), v.seconds));
+    for (const [i, score] of scores.entries()) {
+      expect(score.length, `version ${i + 1}`).toBeGreaterThan(3);
+      const last = score.at(-1)!;
+      expect(last.start + last.onsetLength + last.vowelLength).toBeLessThanOrEqual(WHISPER_VARIANTS[i]!.seconds);
+    }
+    expect(new Set(scores.map((score) => JSON.stringify(score))).size).toBe(6);
+    expect(new Set(WHISPER_VARIANTS.map((v) => v.formants)).size).toBeGreaterThan(3);
+    expect(new Set(WHISPER_VARIANTS.map((v) => Math.sign(v.pan)))).toEqual(new Set([-1, 1]));
+  });
+
+  it('are picked at random, never the one just played, and all get played', () => {
+    const rng = createRng(12);
+    const seen = new Set<number>();
+    let last: number | undefined;
+    for (let i = 0; i < 200; i++) {
+      const next = pickVariant(rng, 6, last);
+      expect(next).not.toBe(last);
+      expect(next).toBeGreaterThanOrEqual(1);
+      expect(next).toBeLessThanOrEqual(6);
+      seen.add(next);
+      last = next;
+    }
+    expect(seen.size).toBe(6);
   });
 });

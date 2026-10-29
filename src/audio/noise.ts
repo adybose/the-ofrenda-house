@@ -170,8 +170,9 @@ export interface WhisperSyllable {
 }
 
 /**
- * A whispered phrase of made-up words, about four syllables a second: a hushing consonant (most of
- * the time), a vowel, and now and then a breath between words. It opens with a hiss.
+ * A whispered phrase of made-up words, slow, about two or three syllables a second: a hushing
+ * consonant (most of the time), a drawn-out vowel, and now and then a breath between words. It opens
+ * with a hiss.
  */
 export function whisperScore(rng: Rng, seconds: number): WhisperSyllable[] {
   const vowels = Object.keys(WHISPER_VOWELS) as WhisperVowel[];
@@ -180,12 +181,38 @@ export function whisperScore(rng: Rng, seconds: number): WhisperSyllable[] {
   let t = 0.02;
   for (;;) {
     const onset = score.length === 0 ? rng.pick(['s', 'sh'] as const) : rng.chance(0.6) ? rng.pick(onsets) : undefined;
-    const onsetLength = onset ? 0.06 + rng.float() * 0.06 : 0;
-    const vowelLength = 0.11 + rng.float() * 0.09;
+    const onsetLength = onset ? 0.1 + rng.float() * 0.08 : 0;
+    const vowelLength = 0.16 + rng.float() * 0.12;
     if (t + onsetLength + vowelLength > seconds) return score;
     const middle = t + (onsetLength + vowelLength) / 2;
     const level = (0.55 + 0.45 * Math.sin((Math.PI * middle) / seconds)) * (0.85 + rng.float() * 0.15);
     score.push({ start: t, onset, onsetLength, vowel: rng.pick(vowels), vowelLength, level });
-    t += onsetLength + vowelLength + (rng.chance(0.25) ? 0.1 + rng.float() * 0.08 : 0.015 + rng.float() * 0.03);
+    t += onsetLength + vowelLength + (rng.chance(0.25) ? 0.15 + rng.float() * 0.1 : 0.03 + rng.float() * 0.03);
   }
+}
+
+export interface WhisperVariant {
+  /** Seeds the phrase (`whisperScore`). */
+  seed: number;
+  seconds: number;
+  /** Scales every formant: a smaller or larger mouth, so each sounds like a different spirit. */
+  formants: number;
+  /** Which ear, and how close: -1 is hard left, 1 hard right. */
+  pan: number;
+}
+
+/** The whispers the house can make; the engine picks one at random each time. */
+export const WHISPER_VARIANTS: readonly WhisperVariant[] = [
+  { seed: 101, seconds: 2.6, formants: 1, pan: -0.8 },
+  { seed: 102, seconds: 3, formants: 0.9, pan: 0.75 },
+  { seed: 103, seconds: 2.2, formants: 1.1, pan: -0.65 },
+  { seed: 104, seconds: 3.2, formants: 0.95, pan: 0.85 },
+  { seed: 105, seconds: 2.4, formants: 1.15, pan: 0.6 },
+  { seed: 106, seconds: 2.8, formants: 1.05, pan: -0.9 },
+];
+
+/** A version from 1 to `count` at random, never `last` (so the same whisper never plays twice running). */
+export function pickVariant(rng: Rng, count: number, last?: number): number {
+  const choices = Array.from({ length: count }, (_, i) => i + 1).filter((v) => v !== last);
+  return rng.pick(choices);
 }

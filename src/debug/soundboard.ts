@@ -27,7 +27,8 @@ export function showSoundboard(audio: AudioEngine): void {
     <label style="margin-left:16px">Play 3 m to the <select id="sb-side"><option value="">centre</option><option value="left">left</option><option value="right">right</option></select></label>`;
   document.body.appendChild(panel);
 
-  const params: Partial<Record<SoundName, { param: number; label: string }[]>> = {
+  // No param: the engine chooses (for whispers, a random version).
+  const params: Partial<Record<SoundName, { param?: number; label: string }[]>> = {
     thunder: [
       { param: 1, label: 'thunder (overhead)' },
       { param: 0.3, label: 'thunder (far)' },
@@ -36,6 +37,7 @@ export function showSoundboard(audio: AudioEngine): void {
       { param: 1, label: 'clock (1)' },
       { param: 6, label: 'clock (6, dawn)' },
     ],
+    whisper: [{ label: 'whisper (random)' }, ...[1, 2, 3, 4, 5, 6].map((param) => ({ param, label: `whisper ${param}` }))],
     clockTick: [
       { param: 0, label: 'clock tick' },
       { param: 1, label: 'clock tock' },
@@ -44,7 +46,7 @@ export function showSoundboard(audio: AudioEngine): void {
   const side = panel.querySelector<HTMLSelectElement>('#sb-side')!;
   const buttons = panel.querySelector('#sb-buttons')!;
   for (const name of SOUND_NAMES.filter((n) => n !== 'rain' && n !== 'wind' && n !== 'splat')) {
-    for (const { param, label } of params[name] ?? [{ param: 0, label: name }]) {
+    for (const { param, label } of params[name] ?? [{ label: name }]) {
       const button = document.createElement('button');
       button.textContent = label;
       Object.assign(button.style, { font: 'inherit', padding: '4px 10px', cursor: 'pointer' });

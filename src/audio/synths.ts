@@ -1,5 +1,5 @@
 import { createRng, type Rng } from '../core/rng';
-import { RAIN_LOOP_SECONDS, WHISPER_ONSETS, WHISPER_VOWELS, brownNoise, pinkNoise, rainGrains, stickSlip, whiteNoise, whisperScore, type SlipOptions } from './noise';
+import { RAIN_LOOP_SECONDS, WHISPER_ONSETS, WHISPER_VARIANTS, WHISPER_VOWELS, brownNoise, pinkNoise, rainGrains, stickSlip, whiteNoise, whisperScore, type SlipOptions } from './noise';
 
 // Every sound in the game, synthesised from oscillators, noise and filters. Each synth builds
 // its nodes on any context (live or offline), connects them to `out`, starts at `t`, and returns
@@ -204,6 +204,35 @@ function saturate(s: SynthContext, drive: number, level = 0.95): SynthContext {
   return { ...s, out: shaper };
 }
 
+const voiceCache = new WeakMap<BaseAudioContext, PeriodicWave>();
+
+/** A voice-like source: harmonics falling off as 1/n^1.5, softer than a sawtooth's buzz. */
+function voiceWave(ctx: BaseAudioContext): PeriodicWave {
+  let wave = voiceCache.get(ctx);
+  if (!wave) {
+    const harmonics = 40;
+    const real = new Float32Array(harmonics + 1);
+    const imag = new Float32Array(harmonics + 1);
+    for (let n = 1; n <= harmonics; n++) imag[n] = 1 / n ** 1.5;
+    wave = ctx.createPeriodicWave(real, imag);
+    voiceCache.set(ctx, wave);
+  }
+  return wave;
+}
+
+/**
+ * A living voice's unsteadiness: slowly wandering noise (below `speed` Hz) added to a pitch, about
+ * `hz` either way. Never a regular vibrato. Returns the node so a second voice can follow it.
+ */
+function unsteady(s: SynthContext, hz: number, speed: number, until: number): GainNode {
+  const source = noise(s, 'brown', true);
+  const slow = filter(s, 'lowpass', speed);
+  const depth = gain(s, hz * 4);
+  chain(source, slow, depth);
+  startNoise(source, s, s.t, until - s.t);
+  return depth;
+}
+
 /** A very slow oscillator scaled to `depth`, added onto a parameter: endless, unrepeating drift. */
 function drift(s: SynthContext, target: AudioParam, frequency: number, depth: number, until: number): void {
   const lfo = s.ctx.createOscillator();
@@ -337,7 +366,7 @@ export function thunder(input: SynthContext): number {
 
 /** Overall levels for the door sounds, set from measured peaks. */
 const CREAK_LEVEL = 2.5;
-const SLAM_LEVEL = 1;
+const SLAM_LEVEL = 1.8;
 const LOCK_LEVEL = 4;
 const UNLOCK_LEVEL = 3.5;
 
@@ -367,17 +396,21 @@ export function creak(input: SynthContext): number {
   return length + 0.1;
 }
 
-/** A heavy door slammed: a deep thud and boom, the wood ringing, the latch snapping home, the frame rattling. */
+/**
+ * A heavy door slammed: the thud you feel (a deep sub and a bass body, clipped so their harmonics
+ * carry on small speakers), the wood ringing, the latch snapping home, the frame rattling.
+ */
 export function slam(input: SynthContext): number {
   const s = withLevel(saturate(input, 3), SLAM_LEVEL);
-  tone(s, s.t, 70, 35, 0.7, 0.003, 0.8);
-  burst(s, s.t, 'brown', 'lowpass', 250, 0.8, 0.4);
-  burst(s, s.t, 'brown', 'lowpass', 900, 0.4, 0.3);
-  click(s, s.t, woodBody(s), 3);
-  burst(s, s.t, 'pink', 'bandpass', 180, 0.35, 0.25, 3);
-  latchClick(s, s.t + 0.008, 1, 0.2);
-  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.06, 0.03, 3);
-  return 1;
+  tone(s, s.t, 48, 30, 0.8, 0.004, 1.2);
+  tone(s, s.t, 95, 55, 0.6, 0.003, 0.5);
+  burst(s, s.t, 'brown', 'lowpass', 200, 0.9, 0.5);
+  burst(s, s.t, 'brown', 'lowpass', 900, 0.27, 0.3);
+  click(s, s.t, woodBody(s), 2);
+  burst(s, s.t, 'pink', 'bandpass', 180, 0.25, 0.25, 3);
+  latchClick(s, s.t + 0.008, 1, 0.13);
+  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.04, 0.03, 3);
+  return 1.2;
 }
 
 /**
@@ -430,8 +463,14 @@ export function footstepTile(s: SynthContext): number {
   return 0.25;
 }
 
-export function footstepCarpet(s: SynthContext): number {
-  burst(s, s.t, 'pink', 'lowpass', 420, 0.4, 0.12, 0.7, 0.9 + s.rng.float() * 0.2);
+const CARPET_LEVEL = 2.2;
+
+/** A step on carpet: a muffled thud and the soft brush of the pile. The softest floor, but heard. */
+export function footstepCarpet(input: SynthContext): number {
+  const s = withLevel(input, CARPET_LEVEL);
+  const rate = 0.9 + s.rng.float() * 0.2;
+  burst(s, s.t, 'pink', 'lowpass', 420, 0.4, 0.12, 0.7, rate);
+  burst(s, s.t + 0.01, 'pink', 'bandpass', 1200, 0.12, 0.08, 0.8, rate);
   return 0.25;
 }
 
@@ -506,23 +545,25 @@ export function stinger(s: SynthContext): number {
 const WHISPER_LEVEL = 1.6;
 
 /**
- * Someone whispering in your ear, never quite understood: a phrase of made-up syllables
- * (`whisperScore`) as one continuous breath through three vowel formants that drift from syllable to
- * syllable, with soft hushing consonants, swelling and easing rather than chopped, close to one side.
+ * Someone whispering in your ear, never quite understood: one of `WHISPER_VARIANTS` (param 1 to 6, or
+ * 0 for any), a slow phrase of made-up syllables as one continuous breath through three vowel formants
+ * that drift from syllable to syllable, with soft hushing consonants. The breath swells and eases
+ * gently, never chopped, close to one ear.
  */
 export function whisper(input: SynthContext): number {
+  const index = input.param >= 1 && input.param <= WHISPER_VARIANTS.length ? Math.round(input.param) : input.rng.int(1, WHISPER_VARIANTS.length);
+  const variant = WHISPER_VARIANTS[index - 1]!;
   const ear = input.ctx.createStereoPanner();
-  ear.pan.value = (input.rng.chance(0.5) ? -1 : 1) * (0.6 + input.rng.float() * 0.3);
+  ear.pan.value = variant.pan;
   const soft = filter(input, 'lowpass', 5000);
   chain(soft, ear, input.out);
   const s = withLevel({ ...input, out: soft }, WHISPER_LEVEL);
-  const length = 1.8 + s.rng.float() * 0.8;
-  const score = whisperScore(s.rng, length);
+  const score = whisperScore(createRng(variant.seed), variant.seconds);
+  const mouth = (vowel: keyof typeof WHISPER_VOWELS) => WHISPER_VOWELS[vowel].map((f) => f * variant.formants);
 
   const breath = noise(s, 'white');
   const vowel = gain(s, 0);
-  const first = WHISPER_VOWELS[score[0]?.vowel ?? 'a'];
-  const bands = first.map((frequency, i) => {
+  const bands = mouth(score[0]?.vowel ?? 'a').map((frequency, i) => {
     const band = filter(s, 'bandpass', frequency, [7, 9, 11][i]);
     chain(breath, band, gain(s, [1, 0.7, 0.4][i]), vowel);
     return band;
@@ -540,23 +581,23 @@ export function whisper(input: SynthContext): number {
       const onset = WHISPER_ONSETS[syllable.onset];
       hissBand.frequency.setValueAtTime(onset.frequency, at);
       hissBand.Q.setValueAtTime(onset.q, at);
-      hiss.gain.setTargetAtTime(onset.level * syllable.level, at, syllable.onsetLength * 0.3);
-      hiss.gain.setTargetAtTime(0, vowelAt - 0.01, 0.03);
+      hiss.gain.setTargetAtTime(onset.level * syllable.level, at, syllable.onsetLength * 0.4);
+      hiss.gain.setTargetAtTime(0, vowelAt - 0.02, 0.06);
     }
-    // The mouth drifts towards each vowel; the breath swells into it and eases off.
-    WHISPER_VOWELS[syllable.vowel].forEach((frequency, k) => bands[k]!.frequency.setTargetAtTime(frequency, vowelAt - 0.06, 0.08));
-    vowel.gain.setTargetAtTime(syllable.level, vowelAt - 0.03, 0.06);
-    // Between words (a longer gap) the breath almost stops; between syllables it only dips.
+    // The mouth drifts towards each vowel; the breath swells slowly into it and eases off.
+    mouth(syllable.vowel).forEach((frequency, k) => bands[k]!.frequency.setTargetAtTime(frequency, vowelAt - 0.1, 0.12));
+    vowel.gain.setTargetAtTime(syllable.level, vowelAt - 0.08, 0.12);
+    // Between words (a longer gap) the breath sinks low; between syllables it only dips.
     const next = score[i + 1];
     const end = vowelAt + syllable.vowelLength;
     const gap = next ? next.start - end : 1;
-    vowel.gain.setTargetAtTime(syllable.level * (gap > 0.08 ? 0.15 : 0.5), end - 0.04, 0.05);
+    vowel.gain.setTargetAtTime(syllable.level * (gap > 0.1 ? 0.25 : 0.6), end - 0.06, 0.15);
   }
   const last = score.at(-1);
-  vowel.gain.setTargetAtTime(0, last ? s.t + last.start + last.onsetLength + last.vowelLength : s.t, 0.05);
-  startNoise(breath, s, s.t, length + 0.2);
-  startNoise(hissSource, s, s.t, length + 0.2);
-  return length + 0.3;
+  vowel.gain.setTargetAtTime(0, last ? s.t + last.start + last.onsetLength + last.vowelLength : s.t, 0.15);
+  startNoise(breath, s, s.t, variant.seconds + 0.6);
+  startNoise(hissSource, s, s.t, variant.seconds + 0.6);
+  return variant.seconds + 0.7;
 }
 
 export function bat(s: SynthContext): number {
@@ -589,101 +630,135 @@ export function rat(s: SynthContext): number {
   return 1.2;
 }
 
-const CAT_LEVEL = 0.5;
+const CAT_LEVEL = 0.65;
 
 /**
- * A cat's meow: one steady voice (no vibrato) whose pitch rises and falls in a smooth arch, with the
- * mouth opening and closing, "mi-a-ow": the formants glide from i to a to u.
+ * A cat's meow, "m-ia-ow": a soft, voice-like tone (not a buzz) with a living unsteadiness far too
+ * small to waver, its pitch arching high (about 650 up to 900 and down to 600 Hz). The mouth starts
+ * closed and humming, opens wide and closes again: the formants (higher than a person's, for a small
+ * head) glide from "m" to "ia" to "ow", with a little breath through them, more at the end.
  */
 export function cat(s: SynthContext): number {
-  const length = 0.8 + s.rng.float() * 0.25;
-  const pitch = 0.92 + s.rng.float() * 0.16;
+  const length = 0.75 + s.rng.float() * 0.25;
+  const pitch = 0.94 + s.rng.float() * 0.12;
   const voice = s.ctx.createOscillator();
-  voice.type = 'sawtooth';
+  voice.setPeriodicWave(voiceWave(s.ctx));
   const steps = 32;
   const curve = new Float32Array(steps);
   for (let i = 0; i < steps; i++) {
     const x = i / (steps - 1);
-    const hz = x < 0.35 ? 520 + 200 * Math.sin((Math.PI / 2) * (x / 0.35)) : 720 - 260 * Math.sin((Math.PI / 2) * ((x - 0.35) / 0.65));
-    curve[i] = hz * pitch;
+    curve[i] = pitch * (x < 0.3 ? 650 + 250 * Math.sin((Math.PI / 2) * (x / 0.3)) : 900 - 300 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7)));
   }
   voice.frequency.setValueCurveAtTime(curve, s.t, length);
-  const soft = filter(s, 'lowpass', 3500);
-  chain(voice, soft);
+  unsteady(s, 750 * pitch * 0.005, 15, s.t + length + 0.1).connect(voice.frequency);
+  const breath = noise(s, 'white');
+  const breathLevel = gain(s);
+  breathLevel.gain.setValueAtTime(0.1, s.t);
+  breathLevel.gain.linearRampToValueAtTime(0.2, s.t + length);
+  chain(breath, breathLevel);
+  startNoise(breath, s, s.t, length + 0.05);
+
   const mouth = gain(s, 1);
   const shapes: [number, number, number, number][] = [
-    // [start, open, end, q]
-    [500, 1000, 450, 6],
-    [2200, 1600, 900, 7],
-    [3000, 2900, 2600, 8],
+    // [closed "m", open "ia", closing "ow", q]
+    [700, 1300, 900, 6],
+    [1900, 2600, 1600, 7],
+    [3800, 3900, 3600, 8],
   ];
-  for (const [i, [from, open, to, q]] of shapes.entries()) {
-    const band = filter(s, 'bandpass', from, q);
-    band.frequency.setValueAtTime(from, s.t);
+  for (const [i, [closed, open, closing, q]] of shapes.entries()) {
+    const band = filter(s, 'bandpass', closed, q);
+    band.frequency.setValueAtTime(closed, s.t + 0.07);
     band.frequency.linearRampToValueAtTime(open, s.t + length * 0.35);
-    band.frequency.linearRampToValueAtTime(to, s.t + length);
-    chain(soft, band, gain(s, [1, 0.6, 0.3][i]), mouth);
+    band.frequency.linearRampToValueAtTime(closing, s.t + length);
+    chain(voice, band);
+    breathLevel.connect(band);
+    chain(band, gain(s, [1, 0.7, 0.35][i]), mouth);
   }
-  chain(soft, filter(s, 'lowpass', 1200), gain(s, 0.15), mouth);
+  // The "m": a closed-mouth hum that gives way as the mouth opens.
+  const hum = gain(s);
+  hum.gain.setValueAtTime(0.4, s.t);
+  hum.gain.linearRampToValueAtTime(0, s.t + 0.12);
+  chain(voice, filter(s, 'lowpass', 900), hum, mouth);
+  // The level follows the pitch: quiet on the "m", fullest as it opens, easing as it closes.
   const g = gain(s);
   g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(CAT_LEVEL, s.t + 0.06);
-  g.gain.setValueAtTime(CAT_LEVEL, s.t + length * 0.6);
+  g.gain.exponentialRampToValueAtTime(CAT_LEVEL * 0.35, s.t + 0.07);
+  g.gain.exponentialRampToValueAtTime(CAT_LEVEL, s.t + length * 0.3);
+  g.gain.exponentialRampToValueAtTime(CAT_LEVEL * 0.8, s.t + length * 0.7);
   g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
   chain(mouth, g, s.out);
   voice.start(s.t);
   voice.stop(s.t + length + 0.05);
-  // A breath as the mouth opens.
-  burst(s, s.t, 'white', 'bandpass', 3000, 0.05, 0.08, 1);
   return length + 0.1;
 }
 
-const CAT_SCREAM_LEVEL = 0.6;
+const CAT_SCREAM_LEVEL = 0.45;
 
 /**
- * A cat screaming as it bolts (spec 13's scares): sudden and harsh, a high arched cry with a growl's
- * roughness (fast, irregular flutter in its loudness, not a vibrato), "aaow" formants, and a spitting hiss.
+ * A cat screaming as it bolts (spec 13's scares): a warning hiss, then a yowling screech that rises
+ * fast (about 800 to 1300 Hz), holds with a slow uneven drift, and falls away. Its harshness is a
+ * second voice at half the pitch fading in and out (as a strained throat does) and breath through the
+ * formants; a spit at the end.
  */
 export function catScream(input: SynthContext): number {
-  const s = withLevel(saturate(input, 2.5), CAT_SCREAM_LEVEL);
-  const length = 0.9 + s.rng.float() * 0.3;
-  const pitch = 0.9 + s.rng.float() * 0.2;
-  const steps = 32;
+  const s = withLevel(saturate(input, 1.6), CAT_SCREAM_LEVEL);
+  burst(s, s.t, 'white', 'bandpass', 4500, 0.3, 0.18, 1);
+  const at = s.t + 0.12;
+  const length = 1.2 + s.rng.float() * 0.4;
+  const pitch = 0.92 + s.rng.float() * 0.16;
+  const steps = 48;
   const curve = new Float32Array(steps);
   for (let i = 0; i < steps; i++) {
     const x = i / (steps - 1);
-    curve[i] = pitch * (x < 0.3 ? 900 + 500 * Math.sin((Math.PI / 2) * (x / 0.3)) : 1400 - 700 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7)));
+    curve[i] = pitch * (x < 0.2 ? 800 + 500 * Math.sin((Math.PI / 2) * (x / 0.2)) : x < 0.75 ? 1300 : 1300 - 400 * Math.sin((Math.PI / 2) * ((x - 0.75) / 0.25)));
   }
+  const drift = unsteady(s, 1200 * pitch * 0.03, 6, at + length + 0.1);
   const voice = s.ctx.createOscillator();
-  voice.type = 'sawtooth';
-  voice.frequency.setValueCurveAtTime(curve, s.t, length);
-  // Roughness: the loudness flutters irregularly, 40 to 80 times a second.
-  const rough = gain(s, 0.6);
-  const flutter = slips(s, length, () => 60, () => 1, { decay: 0.006, jitter: 1.4 });
-  const depth = gain(s, 0.8);
-  chain(flutter, depth);
-  depth.connect(rough.gain);
-  flutter.start(s.t);
+  voice.setPeriodicWave(voiceWave(s.ctx));
+  voice.frequency.setValueCurveAtTime(curve, at, length);
+  drift.connect(voice.frequency);
+  const sub = s.ctx.createOscillator();
+  sub.setPeriodicWave(voiceWave(s.ctx));
+  sub.frequency.setValueCurveAtTime(curve.map((f) => f / 2), at, length);
+  const half = gain(s, 0.5);
+  chain(drift, half);
+  half.connect(sub.frequency);
+  const subLevel = gain(s, 0);
+  subLevel.gain.setValueAtTime(0, at);
+  subLevel.gain.linearRampToValueAtTime(0.3, at + length * 0.3);
+  subLevel.gain.linearRampToValueAtTime(0.1, at + length * 0.55);
+  subLevel.gain.linearRampToValueAtTime(0.35, at + length * 0.8);
+  subLevel.gain.linearRampToValueAtTime(0, at + length);
+  const throat = gain(s, 1);
+  chain(voice, throat);
+  chain(sub, subLevel, throat);
+  const breath = noise(s, 'white');
+  const breathLevel = gain(s, 0.35);
+  chain(breath, breathLevel);
+  startNoise(breath, s, at, length + 0.05);
+
   const mouth = gain(s, 1);
-  for (const [i, [from, open, to, q]] of ([[700, 1100, 650, 5], [1500, 1800, 1100, 6], [3200, 3400, 3000, 7]] as const).entries()) {
+  for (const [i, [from, open, to, q]] of ([[1000, 1400, 1100, 5], [2200, 2800, 2300, 6], [3800, 3900, 3700, 7]] as const).entries()) {
     const band = filter(s, 'bandpass', from, q);
-    band.frequency.setValueAtTime(from, s.t);
-    band.frequency.linearRampToValueAtTime(open, s.t + length * 0.3);
-    band.frequency.linearRampToValueAtTime(to, s.t + length);
-    chain(voice, band, gain(s, [1, 0.8, 0.5][i]), mouth);
+    band.frequency.setValueAtTime(from, at);
+    band.frequency.linearRampToValueAtTime(open, at + length * 0.25);
+    band.frequency.linearRampToValueAtTime(to, at + length);
+    chain(throat, band);
+    breathLevel.connect(band);
+    chain(band, gain(s, [1, 0.8, 0.45][i]), mouth);
   }
   const g = gain(s);
-  g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(1, s.t + 0.03);
-  g.gain.setValueAtTime(1, s.t + length * 0.6);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  chain(mouth, rough, g, s.out);
-  voice.start(s.t);
-  voice.stop(s.t + length + 0.05);
-  // The hiss and spit.
-  burst(s, s.t, 'white', 'bandpass', 4500, 0.35, 0.35, 1.2);
-  burst(s, s.t + length * 0.7, 'white', 'bandpass', 4000, 0.25, 0.25, 1.2);
-  return length + 0.1;
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(1, at + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.9, at + length * 0.75);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + length);
+  chain(mouth, g, s.out);
+  voice.start(at);
+  sub.start(at);
+  voice.stop(at + length + 0.05);
+  sub.stop(at + length + 0.05);
+  burst(s, at + length - 0.05, 'white', 'bandpass', 3500, 0.3, 0.12, 1);
+  return 0.12 + length + 0.15;
 }
 
 /** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */

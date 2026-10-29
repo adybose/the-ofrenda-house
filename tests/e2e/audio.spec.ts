@@ -96,6 +96,21 @@ test('overhead thunder fades gradually and long; the slam is a heavy thud', asyn
   // Half-second windows from 0.5 s to 6 s: none falls under 40% of the one before.
   const fall = thunder.windows.slice(1, 12);
   for (let i = 1; i < fall.length; i++) expect(fall[i]!, `window ${i + 1}`).toBeGreaterThan(fall[i - 1]! * 0.4);
-  // Was 0.085.
-  expect((await page.evaluate(() => window.__ofrenda!.renderSound('slam'))).rms).toBeGreaterThan(0.12);
+  // Was 0.085, then 0.126 (bass 0.114).
+  const slam = await page.evaluate(() => window.__ofrenda!.renderSound('slam'));
+  expect(slam.rms).toBeGreaterThan(0.19);
+  expect(slam.lowRms).toBeGreaterThan(0.17);
+});
+
+test('carpet footsteps are soft but heard, and every whisper version plays', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  // Was 0.106.
+  expect((await page.evaluate(() => window.__ofrenda!.renderSound('footstepCarpet'))).peak).toBeGreaterThan(0.2);
+  for (let version = 1; version <= 6; version++) {
+    const stats = await page.evaluate((v) => window.__ofrenda!.renderSound('whisper', v), version);
+    expect(stats.hasNaN, `whisper ${version}`).toBe(false);
+    expect(stats.peak, `whisper ${version} is silent`).toBeGreaterThan(0.05);
+    expect(stats.peak, `whisper ${version} clips`).toBeLessThanOrEqual(1);
+  }
 });
