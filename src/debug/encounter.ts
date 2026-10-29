@@ -1,4 +1,4 @@
-import { Box3, Color, Vector3, type Object3D, type PerspectiveCamera, type Scene } from 'three';
+import { Box3, Color, Vector3, type BufferAttribute, type Mesh, type Object3D, type PerspectiveCamera, type Scene } from 'three';
 import type { CaseFile } from '../case/types';
 import { STREAMS, createRng } from '../core/rng';
 import type { PlayerController } from '../player/controller';
@@ -6,6 +6,7 @@ import { createSpirit } from '../render/spirit';
 import type { Encounters } from '../story/encounters';
 import type { House } from '../world/house';
 import type { KeyRoomState } from '../world/types';
+import { worldToCell } from '../world/units';
 
 /** Test handle on window.__encounter, installed by `?debug=encounter`. */
 export interface EncounterDebug {
@@ -24,6 +25,16 @@ export interface EncounterDebug {
   spiritLit(): number;
   /** The spirit's box on screen, as fractions of the view: [x0, y0, x1, y1]. */
   spiritRegion(): [number, number, number, number] | undefined;
+  /** The cells the spirit drifted in from and to (spec 19). */
+  entrance(): { from: string; to: string } | undefined;
+  /** How far the spirit stands in front of its portrait's wall, in metres (negative: still behind it). */
+  wallOffset(): number | undefined;
+  /** How far along its drift the spirit on screen is, 0..1. */
+  drift(): number | undefined;
+  /** The lowest point of the spirit's figure, in metres above the floor. */
+  spiritLowest(): number | undefined;
+  /** Whether a spirit is on its way out through a wall. */
+  leaving(): boolean;
 }
 
 declare global {
@@ -63,6 +74,23 @@ export function installEncounterDebug(options: { encounters: Encounters; house: 
       scene.background = new Color(colour);
     },
     spiritLit: () => encounters.spirit()?.lit ?? 0,
+    entrance() {
+      const e = encounters.entrance();
+      return e && { from: worldToCell(e.from.x, e.from.z), to: worldToCell(e.to.x, e.to.z) };
+    },
+    drift: () => encounters.spirit()?.drift01,
+    wallOffset() {
+      const wall = encounters.entrance()?.wall;
+      const spirit = encounters.spirit();
+      return wall && spirit ? spirit.position.clone().sub(wall.point).dot(wall.inward) : undefined;
+    },
+    spiritLowest() {
+      const figure = encounters.spirit()?.children[0] as Mesh | undefined;
+      if (!figure) return undefined;
+      figure.updateWorldMatrix(true, false);
+      return new Box3().setFromBufferAttribute(figure.geometry.getAttribute('position') as BufferAttribute).applyMatrix4(figure.matrixWorld).min.y;
+    },
+    leaving: () => encounters.leavingSpirit() !== undefined,
     spiritRegion() {
       const spirit = encounters.spirit();
       if (!spirit) return undefined;
