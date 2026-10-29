@@ -16,6 +16,8 @@ const CORNERS = {
 
 test('the flashlight lights the centre of the view and leaves the edges dark; off, the room is near-black', async ({ page, consoleErrors }) => {
   await boot(page, 'debug=hooks&skip=prologue');
+  // This measures the lit scene: the HUD overlays (spec 10) in the corners don't count.
+  await page.addStyleTag({ content: '.hud-slot, #journal-button { display: none !important; }' });
   await page.evaluate(() => window.__ofrenda!.viewRoom('filler'));
   await page.evaluate(() => window.__ofrenda!.frames(3));
 

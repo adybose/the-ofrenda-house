@@ -13,7 +13,7 @@ import type { CellId, ChunkDiff, DoorId, Room } from '../world/types';
 import { CELL_SIZE, cellCentre } from '../world/units';
 
 /** Events the hook records for tests. */
-const RECORDED = ['arrivalStage', 'interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning'] as const;
+const RECORDED = ['arrivalStage', 'interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning', 'encounterStarted', 'encounterEnded', 'clueAwarded', 'keyAwarded', 'riddleFailed', 'encounterActive'] as const;
 
 export type DebugRoomKind = 'filler' | 'key' | 'corridor';
 

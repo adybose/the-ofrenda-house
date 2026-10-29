@@ -2,7 +2,8 @@ import { generateCase } from '../../src/case/generate';
 import type { CaseFile, Character, CharacterId } from '../../src/case/types';
 import { createRng, hashSeed } from '../../src/core/rng';
 import { trustBucket } from '../../src/dialogue/trust';
-import { FALLBACKS, SHADOW_TAUNTS } from '../fallbacks';
+import { fallbackLine, riddleFor } from '../../src/dialogue/fallback-lines';
+import { SHADOW_TAUNTS } from '../fallbacks';
 import { LruCache } from './cache';
 import { OllamaClient, type OllamaConfig, type Priority } from './ollama';
 import { buildPrompt, buildTauntPrompt } from './prompts';
@@ -22,12 +23,6 @@ export interface Bridge {
   available(): Promise<boolean>;
   idle(): Promise<void>;
   caseFor(seed: number | string): CaseFile;
-}
-
-/** Builds the riddle the player sees: the model's (or fallback's) wrong answers and the case file's answer, shuffled by seed. */
-function riddleFor(seed: number, character: Character, question: string, wrong: readonly string[]): LineResponse['riddle'] {
-  const options = createRng(seed).fork('dialogue').fork(`riddle:${character.id}`).shuffle([character.riddle.answer, ...wrong]);
-  return { question, options, correctIndex: options.indexOf(character.riddle.answer) };
 }
 
 /** The model likes Markdown emphasis (`*amigo*`); the dialogue box shows plain text. */
@@ -94,29 +89,6 @@ export function createBridge(config: OllamaConfig, hooks: BridgeHooks = {}): Bri
     return { source: 'llm', line: (output as LineOutput).line };
   }
 
-  function fallback(seed: number, caseFile: CaseFile, character: Character, request: LineRequest): LineResponse {
-    const lines = FALLBACKS[character.role];
-    const rng = createRng(seed).fork('dialogue').fork(`fallback:${character.id}:${request.step}`);
-    switch (request.step) {
-      case 'greeting':
-        return { source: 'fallback', line: rng.pick(lines.greeting[trustBucket(request.trust)]) };
-      case 'whoAreYou':
-        return { source: 'fallback', line: rng.pick(lines.whoAreYou) };
-      case 'reaction':
-        return { source: 'fallback', line: rng.pick(lines.reaction[request.lastChoiceCategory ?? 'evasive']) };
-      case 'riddle': {
-        const riddle = lines.riddles[character.riddle.theme]!;
-        return { source: 'fallback', line: riddle.question, riddle: riddleFor(seed, character, riddle.question, riddle.wrong) };
-      }
-      case 'reward': {
-        const facts = caseFile.facts.filter((f) => f.holderId === character.id).map((f) => f.text);
-        return { source: 'fallback', line: rng.pick(lines.reward).replace('{fact}', facts.join(' ')) };
-      }
-      case 'silence':
-        return { source: 'fallback', line: rng.pick(lines.silence) };
-    }
-  }
-
   const cacheKey = (seed: number, characterId: string, step: SpiritStep, trust: number) => `${seed}|${characterId}|${step}|${trustBucket(trust)}`;
 
   return {
@@ -132,7 +104,7 @@ export function createBridge(config: OllamaConfig, hooks: BridgeHooks = {}): Bri
         if (cached) return cached;
       }
       const output = await ask(buildPrompt(caseFile, character.id, request.step, request), request.step, context(caseFile, character, request.step), 'live', config.liveTimeoutMs);
-      return output ? toResponse(seed, character, request.step, output) : fallback(seed, caseFile, character, request);
+      return output ? toResponse(seed, character, request.step, output) : fallbackLine(seed, caseFile, character, request);
     },
 
     prefetch(seedInput, characterIds, trust) {

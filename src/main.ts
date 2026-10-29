@@ -19,6 +19,7 @@ import { Interactions } from './player/interaction';
 import { createPlayerState } from './player/movement';
 import { createExteriorScene } from './render/exterior-mesh';
 import { Arrival } from './story/arrival';
+import { Encounters } from './story/encounters';
 import { speakerFor } from './audio/voice';
 import { createDialogue } from './ui/dialogue-box';
 import { createHud } from './ui/hud';
@@ -204,9 +205,16 @@ async function startGame(): Promise<void> {
   const hud = createHud({ prompt });
   events.on('batteryChanged', ({ level }) => hud.set('battery', level));
   let journal: Journal | undefined = undefined;
-  const syncControls = () => player.setControlsEnabled(!dialogue.isOpen() && !journal?.isOpen());
+  let encounters: Encounters | undefined = undefined;
+  const syncControls = () => player.setControlsEnabled(!dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
   const dialogue = createDialogue({ speaker: speakerFor(audio), onOpenChange: syncControls, inputBlocked: () => journal?.isOpen() ?? false });
   journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
+
+  // The spirits (spec 11): an encounter in each key room, once per run.
+  encounters = new Encounters({ seed, caseFile, house, scene, camera, player, dialogue, journal, keys, audio, flashlight, onActiveChange: syncControls });
+  events.on('playerCellChanged', ({ cell }) => {
+    if (!arrival || arrival.stage === 'inside') encounters!.enterCell(cell);
+  });
 
   arrival = new Arrival({
     house,
@@ -263,7 +271,8 @@ async function startGame(): Promise<void> {
     if (!paused) {
       doors.update(dt);
       lightning.update(dt);
-      candles.update(dt, camera.position, view.candles());
+      candles.update(dt, camera.position, [...view.candles(), ...encounters.extraCandles()]);
+      encounters.update(dt, time / 1000);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
@@ -303,6 +312,8 @@ async function startGame(): Promise<void> {
   if (debug.has('soundboard')) (await import('./debug/soundboard')).showSoundboard(audio);
   if (debug.has('voices')) (await import('./debug/voices')).showVoicePanel(audio, seed, caseFile);
   if (debug.has('dialogue')) (await import('./debug/dialogue')).installDialogueDebug({ dialogue, journal, caseFile, seed, demo: url.searchParams.get('demo') !== '0' });
+  if (debug.has('encounter')) (await import('./debug/encounter')).installEncounterDebug({ encounters, house, camera, scene, caseFile });
+  if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
