@@ -1,5 +1,7 @@
 import { createRng, type Rng } from '../core/rng';
 import type { SizeClass } from '../world/types';
+import type { VoiceSpec } from '../dialogue/voices';
+import { ghostVoice } from './ghost';
 import { generateImpulse } from './impulse';
 import { WHISPER_VARIANTS, pickVariant } from './noise';
 import { OneShotPool } from './pool';
@@ -328,6 +330,31 @@ export class AudioEngine {
   }
 
   /** Renders one sound offline and returns its samples (left and right interleaved), for tests. */
+  /** Decodes a spoken line (WAV bytes from `/api/tts`); rejects before audio is unlocked. */
+  decodeAudio(bytes: ArrayBuffer): Promise<AudioBuffer> {
+    if (!this.ctx) return Promise.reject(new Error('audio is locked'));
+    return this.ctx.decodeAudioData(bytes);
+  }
+
+  /** Plays a spoken line through the ghost chain into the voice bus (so the storm ducks under it). */
+  playVoice(buffer: AudioBuffer, voice: VoiceSpec, position?: Vec3): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') throw new Error('audio is not running');
+    ghostVoice(ctx, buffer, voice, this.voice, ctx.currentTime, position);
+  }
+
+  /** For tests: a WAV through the ghost chain, offline; interleaved stereo at 44.1 kHz. */
+  async renderVoiceOffline(bytes: ArrayBuffer, voice: VoiceSpec): Promise<Float32Array> {
+    const rate = 44_100;
+    const decoded = await new OfflineAudioContext(1, rate, rate).decodeAudioData(bytes);
+    const offline = new OfflineAudioContext(2, Math.ceil(rate * (decoded.duration / voice.pitch + 2)), rate);
+    ghostVoice(offline, decoded, voice, offline.destination, 0.01);
+    const rendered = await offline.startRendering();
+    const left = rendered.getChannelData(0);
+    const right = rendered.getChannelData(1);
+    return Float32Array.from({ length: left.length * 2 }, (_, i) => (i % 2 ? right[i >> 1]! : left[i >> 1]!));
+  }
+
   async renderOffline(name: SoundName, seconds: number, param = 0): Promise<Float32Array> {
     const rate = 44_100;
     const offline = new OfflineAudioContext(2, Math.ceil(rate * seconds), rate);

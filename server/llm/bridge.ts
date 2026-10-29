@@ -1,5 +1,5 @@
 import { generateCase } from '../../src/case/generate';
-import type { CaseFile, Character } from '../../src/case/types';
+import type { CaseFile, Character, CharacterId } from '../../src/case/types';
 import { createRng, hashSeed } from '../../src/core/rng';
 import { trustBucket } from '../../src/dialogue/trust';
 import { FALLBACKS, SHADOW_TAUNTS } from '../fallbacks';
@@ -43,7 +43,12 @@ function tidy(output: unknown): unknown {
   };
 }
 
-export function createBridge(config: OllamaConfig): Bridge {
+export interface BridgeHooks {
+  /** Called with each line a prefetch has ready, so its speech can be prefetched too (spec 09). */
+  onPrefetched?(seed: number, characterId: CharacterId, response: LineResponse): void;
+}
+
+export function createBridge(config: OllamaConfig, hooks: BridgeHooks = {}): Bridge {
   const client = new OllamaClient(config);
   const cases = new LruCache<CaseFile>(16);
   const cache = new LruCache<LineResponse>(256);
@@ -140,7 +145,10 @@ export function createBridge(config: OllamaConfig): Bridge {
           const key = cacheKey(seed, id, step, trust);
           if (cache.has(key)) continue;
           void ask(buildPrompt(caseFile, character.id, step, { trust }), step, context(caseFile, character, step), 'prefetch', config.prefetchTimeoutMs).then((output) => {
-            if (output) cache.set(key, toResponse(seed, character, step, output));
+            if (!output) return;
+            const response = toResponse(seed, character, step, output);
+            cache.set(key, response);
+            hooks.onPrefetched?.(seed, character.id, response);
           });
         }
       }

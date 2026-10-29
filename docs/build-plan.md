@@ -71,6 +71,7 @@ brew install node git ollama
 ollama serve                              # or open the Ollama app
 ollama pull gemma3:4b
 python3 -m pip install --user piper-tts   # local voices, used by spec 09
+npm run setup:voices                      # fetches the four Piper voice models into voices/, once
 ```
 
 Three terminal tabs: Ollama, `npm run dev` (game and local server, from spec 00 onward), and Claude Code.

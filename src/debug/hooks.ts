@@ -2,6 +2,7 @@ import type { WebGLRenderer } from 'three';
 import type { AudioEngine } from '../audio/engine';
 import { SOUND_NAMES, type SoundName } from '../audio/synths';
 import { events, type GameEvents } from '../core/events';
+import { SHADOW_VOICE } from '../dialogue/voices';
 import type { Flashlight } from '../lighting/flashlight';
 import type { Lightning, StrikeOptions } from '../lighting/lightning';
 import type { PlayerController } from '../player/controller';
@@ -48,6 +49,9 @@ export interface OfrendaDebug {
   ambienceGain(): number;
   masterGain(): number;
   testVoice(seconds: number): void;
+  /** A voice-like test WAV through the spirit or La Sombra ghost chain, offline (spec 09). */
+  /** `tail`: seconds of sound after the words end (echo); `centroid`: brightness in Hz (see `spectrum`). */
+  renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; flatness: number; centroid: number; tail: number; hasNaN: boolean }>;
   setTension(level: number): void;
   audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
   setOutdoors(on: boolean): void;
@@ -202,6 +206,23 @@ export function installDebugHooks(options: {
     ambienceGain: () => options.audio.levels().ambience,
     masterGain: () => options.audio.levels().master,
     testVoice: (seconds) => options.audio.testVoice(seconds),
+    async renderGhostVoice(kind) {
+      const voice = kind === 'shadow' ? SHADOW_VOICE : { voiceId: 'en_US-lessac-medium', pitch: 0.9, rate: 1.1, expression: 0.8 };
+      const samples = await options.audio.renderVoiceOffline(testWav(), voice);
+      let peak = 0;
+      let sum = 0;
+      let last = 0;
+      let hasNaN = false;
+      samples.forEach((v, i) => {
+        if (Number.isNaN(v)) hasNaN = true;
+        peak = Math.max(peak, Math.abs(v));
+        sum += v * v;
+        if (Math.abs(v) > 0.005) last = i;
+      });
+      // The words start at 0.01 s and last the test WAV's 1.5 s, stretched by the pitch shift.
+      const tail = last / 2 / 44_100 - 0.01 - TEST_WAV_SECONDS / voice.pitch;
+      return { peak, rms: Math.sqrt(sum / samples.length), ...spectrum(samples), tail, hasNaN };
+    },
     setTension: (level) => options.audio.setTension(level),
     audioLevels: () => options.audio.levels(),
     setOutdoors: (on) => options.audio.setOutdoors(on),
@@ -257,4 +278,37 @@ function spectrum(samples: Float32Array): { flatness: number; centroid: number }
   });
   const median = (list: number[]) => list.sort((a, b) => a - b)[Math.floor(list.length / 2)] ?? 0;
   return { flatness: median(values.map((v) => v.flatness)), centroid: median(values.map((v) => v.centroid)) };
+}
+
+/**
+ * A stand-in for a Piper line: 1.5 s of a 130 Hz voice-like buzz in syllables, normalised near full
+ * scale as Piper's speech is, as a 16-bit mono 22,050 Hz WAV.
+ */
+const TEST_WAV_SECONDS = 1.5;
+
+function testWav(): ArrayBuffer {
+  const rate = 22_050;
+  const length = Math.round(rate * TEST_WAV_SECONDS);
+  const wav = new DataView(new ArrayBuffer(44 + length * 2));
+  const text = (at: number, value: string) => [...value].forEach((c, i) => wav.setUint8(at + i, c.charCodeAt(0)));
+  text(0, 'RIFF');
+  wav.setUint32(4, 36 + length * 2, true);
+  text(8, 'WAVEfmt ');
+  wav.setUint32(16, 16, true);
+  wav.setUint16(20, 1, true);
+  wav.setUint16(22, 1, true);
+  wav.setUint32(24, rate, true);
+  wav.setUint32(28, rate * 2, true);
+  wav.setUint16(32, 2, true);
+  wav.setUint16(34, 16, true);
+  text(36, 'data');
+  wav.setUint32(40, length * 2, true);
+  for (let i = 0; i < length; i++) {
+    const t = i / rate;
+    let v = 0;
+    for (let h = 1; h <= 12; h++) v += Math.sin(2 * Math.PI * 130 * h * t) / h;
+    const syllables = Math.max(0, Math.sin(Math.PI * 4 * t));
+    wav.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, 0.55 * v * syllables)) * 32_767), true);
+  }
+  return wav.buffer;
 }
