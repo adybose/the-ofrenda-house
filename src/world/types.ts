@@ -40,7 +40,12 @@ export type AnchorKind =
   | 'mirror'
   | 'clock'
   | 'portrait'
-  | 'ofrenda';
+  | 'ofrenda'
+  // Spec 18: a spirit's table, the Act 1 stand and its matchbox, a spare candle.
+  | 'candleTable'
+  | 'candleStand'
+  | 'matchbox'
+  | 'spareCandle';
 
 /** A place for a prop, scare or hazard. Wall anchors say which wall with `side`. */
 export interface Anchor {

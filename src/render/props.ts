@@ -186,6 +186,22 @@ export function addFurniture(b: GeometryBuilder, t: TextureCache, item: Furnitur
       if (item.kind === 'pew' || item.h > 0.6) frameBox(b, f, [-hw, hw], [0.46, item.h], [back, back + 0.06], wood);
       legs(0.4, 0.1);
       return;
+    case 'candleTable':
+      // A little table under the portrait, its top under a cloth, a brass candlestick in the middle (spec 18).
+      frameBox(b, f, [-hw, hw], [item.h - 0.05, item.h], [-hd, hd], wood);
+      frameBox(b, f, [-hw - 0.02, hw + 0.02], [item.h - 0.12, item.h + 0.005], [-hd - 0.02, hd + 0.02], t.uv('cloth'));
+      legs(item.h - 0.05);
+      b.prism(item.x, item.z, 0.06, item.h, item.h + 0.02, 8, t.uv('brass'));
+      b.prism(item.x, item.z, 0.025, item.h + 0.02, item.h + 0.08, 6, t.uv('brass'));
+      return;
+    case 'candleStand':
+      // A turned wooden stand: a foot, a post and a small round top with a candlestick.
+      b.prism(item.x, item.z, 0.14, 0, 0.05, 8, wood);
+      b.prism(item.x, item.z, 0.04, 0.05, item.h - 0.04, 6, wood);
+      b.prism(item.x, item.z, hd, item.h - 0.04, item.h, 10, wood);
+      b.prism(item.x, item.z, 0.05, item.h, item.h + 0.02, 8, t.uv('brass'));
+      b.prism(item.x, item.z, 0.022, item.h + 0.02, item.h + 0.07, 6, t.uv('brass'));
+      return;
   }
 }
 

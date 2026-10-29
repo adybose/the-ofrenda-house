@@ -1,11 +1,11 @@
 import { isCritical } from '../lighting/battery';
 import { el, useTheme } from './theme';
 
-/** The HUD's slots (spec 10): filled by specs 05 (prompt), 06 (battery), 12 (petals) and 14 (clock). */
-export type HudSlot = 'prompt' | 'battery' | 'petals' | 'clock';
+/** The HUD's slots (spec 10): filled by specs 05 (prompt), 06 (battery), 18 (matches, candles, keys) and 14 (clock). */
+export type HudSlot = 'prompt' | 'battery' | 'matches' | 'candles' | 'keys' | 'clock';
 
 export interface Hud {
-  /** Shows a slot's value; `undefined` hides it. Battery is 0..1, petals a count, the rest text. */
+  /** Shows a slot's value; `undefined` hides it. Battery is 0..1, matches a count, the rest text. */
   set(slot: HudSlot, value: string | number | undefined): void;
 }
 
@@ -25,7 +25,10 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
   Object.assign(fill.style, { display: 'block', height: '100%', background: '#d9b46c' });
   bar.appendChild(fill);
   battery.append('Torch', bar);
-  const petals = corner('hud-petals', { right: '16px', bottom: '16px' });
+  // What the player carries, stacked bottom right (spec 18).
+  const matches = corner('hud-matches', { right: '16px', bottom: '64px' });
+  const candles = corner('hud-candles', { right: '16px', bottom: '40px' });
+  const keys = corner('hud-keys', { right: '16px', bottom: '16px' });
   const clock = corner('hud-clock', { right: '16px', top: '16px' });
 
   return {
@@ -35,7 +38,7 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
         else options.prompt.show(String(value));
         return;
       }
-      const node = slot === 'battery' ? battery : slot === 'petals' ? petals : clock;
+      const node = { battery, matches, candles, keys, clock }[slot];
       node.style.display = value === undefined ? 'none' : 'block';
       if (value === undefined) return;
       if (slot === 'battery') {
@@ -44,7 +47,7 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
         // Red once critical (spec 17).
         fill.style.background = isCritical(level) ? '#b03a2e' : '#d9b46c';
       }
-      else if (slot === 'petals') node.textContent = `Petals: ${value}`;
+      else if (slot === 'matches') node.textContent = `Matches: ${value}`;
       else node.textContent = String(value);
     },
   };

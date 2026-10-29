@@ -18,7 +18,6 @@ import {
 import type { TextureCache, UvRect } from './atlas';
 import { GeometryBuilder, at, frameBox, shadeTint, type Frame, type Tint } from './builder';
 import {
-  addCandle,
   addChandelier,
   addClock,
   addDoorPanel,
@@ -36,7 +35,7 @@ const C = CELL_SIZE;
 export interface ChunkMeshData {
   doors: Map<DoorId, { index: number; x: number; z: number; yaw: number; swing: number }>;
   chandeliers: Map<CellId, number>;
-  /** Where candle light comes from (key rooms, the ofrenda), in world metres. */
+  /** Where candle light comes from (the ofrenda; spec 18's candles are lit by the items), in world metres. */
   candles: [number, number, number][];
 }
 
@@ -246,27 +245,6 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
           addPortraitFrame(b, textures, f, 1.8);
           addPortraitPicture(portraits, textures.portraitUv(anchor.characterId), f, 1.8);
         }
-      }
-    }
-
-    // A spirit's room shows its portrait on the first plain wall at the middle of the room.
-    if (room.kind === 'key' && room.characterId) {
-      const [sx, sy] = slotOfCell(...parseCell(room.cells[0]!));
-      for (const side of DIRS) {
-        const [dx, dy] = DIR_STEP[side];
-        const cell = cellId(sx * SLOT_CELLS + 2 + dx * 2, sy * SLOT_CELLS + 2 + dy * 2);
-        if (openings.has(`${cell}|${side}`) || room.anchors.some((a) => a.cell === cell && a.side === side)) continue;
-        const f = centredFrame(cell, side);
-        addPortraitFrame(b, textures, f, 1.7);
-        addPortraitPicture(portraits, textures.portraitUv(room.characterId), f, 1.7);
-        // A few candles burn on the floor beneath the spirit's portrait, the room's only light.
-        for (const [along, out, height] of [[-0.25, 0.3, 0.25], [0.05, 0.38, 0.18], [0.3, 0.28, 0.3]] as const) {
-          const p = at(f, along, 0, out);
-          addCandle(b, textures, p[0], 0, p[2], height);
-        }
-        const light = at(f, 0, 0.5, 0.45);
-        data.candles.push([light[0], light[1], light[2]]);
-        break;
       }
     }
 

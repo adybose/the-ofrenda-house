@@ -20,6 +20,8 @@ import { createPlayerState } from './player/movement';
 import { createExteriorScene } from './render/exterior-mesh';
 import { Arrival } from './story/arrival';
 import { Encounters } from './story/encounters';
+import { ItemsController } from './items/controller';
+import { candleSummary } from './items/items';
 import { speakerFor } from './audio/voice';
 import { createDialogue } from './ui/dialogue-box';
 import { createHud } from './ui/hud';
@@ -80,12 +82,15 @@ async function startGame(): Promise<void> {
   const textures = createTextureCache(seed, caseFile);
   const view = new WorldView(scene, textures);
   const interactions = new Interactions();
-  /** Keys the player holds (spec 11 hands them out). */
+  /** Keys the player holds: picked up from beside a spirit's candle (spec 18). */
   const keys = new Set<string>();
   const doors = new DoorController({ house, view, interactions, hasKey: (key) => keys.has(key) });
+  // Candles, matches and keys (spec 18). `&matches=N` puts N matches in the box (debug).
+  const items = new ItemsController({ scene, house, interactions, matches: url.searchParams.has('matches') ? Number(url.searchParams.get('matches')) : undefined });
   const applyDiff = (diff: ChunkDiff, options?: { spread?: boolean }) => {
     view.apply(diff, options);
     doors.sync(diff);
+    items.sync(diff);
   };
 
   // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall,
@@ -213,7 +218,44 @@ async function startGame(): Promise<void> {
   journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
 
   // The spirits (spec 11): an encounter in each key room, once per run.
-  encounters = new Encounters({ seed, caseFile, house, scene, camera, player, dialogue, journal, keys, audio, flashlight, onActiveChange: syncControls });
+  encounters = new Encounters({
+    seed,
+    caseFile,
+    house,
+    scene,
+    camera,
+    player,
+    dialogue,
+    journal,
+    audio,
+    flashlight,
+    onActiveChange: syncControls,
+    // Once a spirit has gone: its candle lights if it was set at peace, and its keys lie by the candle.
+    onSpiritLeft: ({ characterId, outcome, keyIds }) => {
+      if (outcome === 'reward') items.spiritSolved(characterId);
+      items.layKeys(characterId, keyIds);
+    },
+  });
+
+  // What the player carries, on the HUD, and the keys into their pocket and journal (spec 18).
+  const showCarried = () => {
+    const state = items.snapshot();
+    hud.set('matches', state.hasMatchbox ? state.matches : undefined);
+    hud.set('candles', candleSummary(state));
+    hud.set('keys', keys.size ? `Keys: ${keys.size}` : undefined);
+  };
+  events.on('keyPickedUp', ({ keyId }) => {
+    keys.add(keyId);
+    journal!.addKey(keyId);
+  });
+  for (const name of ['itemPickedUp', 'matchStruck', 'candleLit', 'candleOut', 'candlePlaced', 'keyPickedUp'] as const) events.on(name, showCarried);
+  let carriedCheck = 0;
+  // M strikes a match (lighting the candle in hand if it is unlit); B blows the candle out.
+  window.addEventListener('keydown', (event) => {
+    if (event.repeat || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive()) return;
+    if (event.code === 'KeyM') items.strikeMatch();
+    if (event.code === 'KeyB') items.blowOut();
+  });
   events.on('playerCellChanged', ({ cell }) => {
     if (!arrival || arrival.stage === 'inside') encounters!.enterCell(cell);
   });
@@ -273,7 +315,13 @@ async function startGame(): Promise<void> {
     if (!paused) {
       doors.update(dt);
       lightning.update(dt);
-      candles.update(dt, camera.position, [...view.candles(), ...encounters.extraCandles()]);
+      items.update(dt, camera);
+      candles.update(dt, camera.position, [...view.candles(), ...items.litStandingCandles()]);
+      // The held candle's minutes left, now and then.
+      if ((carriedCheck -= dt) <= 0) {
+        carriedCheck = 1;
+        showCarried();
+      }
       encounters.update(dt, time / 1000);
     }
     flashlight.update(paused ? 0 : dt, camera);
@@ -316,6 +364,7 @@ async function startGame(): Promise<void> {
   if (debug.has('dialogue')) (await import('./debug/dialogue')).installDialogueDebug({ dialogue, journal, caseFile, seed, demo: url.searchParams.get('demo') !== '0' });
   if (debug.has('encounter')) (await import('./debug/encounter')).installEncounterDebug({ encounters, house, camera, scene, caseFile });
   if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
+  if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });

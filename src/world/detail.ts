@@ -14,6 +14,7 @@ import {
   isWing,
 } from './grid';
 import { generateLayout, houseRng, type ChunkLayout, type SlotLayout } from './layout';
+import { freeWallSpots } from './stands';
 import type { Anchor, CellId, Chunk, Dir, Door, FillerKind, Room, SizeClass, Window } from './types';
 
 const MID = (SLOT_CELLS - 1) / 2;
@@ -137,6 +138,10 @@ function wingRooms(layout: ChunkLayout): Room[] {
       anchors: [
         { kind: 'floorboards', cell: '2,7' },
         { kind: 'darkCorner', cell: '2,12' },
+        // Where the patriarch leaves the player (spec 18): in the corner where the corridor turns for
+        // the sealed exit, an unlit candle and a box of matches.
+        { kind: 'candleStand', cell: '2,2', side: 'S' },
+        { kind: 'matchbox', cell: '2,2' },
       ],
     },
     {
@@ -169,6 +174,18 @@ function wingRooms(layout: ChunkLayout): Room[] {
   ];
 }
 
+/** About one ordinary room in this many has a spare candle (spec 18). */
+const SPARE_CANDLE_ODDS = 6;
+
+/** A spare candle on a free wall of some rooms, from its own stream so the rest of the layout is unchanged. */
+function spareCandle(rng: Rng, room: Room): Anchor | undefined {
+  if (!rng.chance(1 / SPARE_CANDLE_ODDS)) return undefined;
+  const spots = freeWallSpots(room);
+  if (spots.length === 0) return undefined;
+  const { cell, side } = rng.pick(spots);
+  return { kind: 'spareCandle', cell, side };
+}
+
 /** Builds rooms and owned doors from a layout. Pure: same layout, same chunk. */
 export function buildChunk(seed: number, layout: ChunkLayout): Chunk {
   const { cx, cy, epoch } = layout;
@@ -187,12 +204,13 @@ export function buildChunk(seed: number, layout: ChunkLayout): Chunk {
   }
 
   const rng = houseRng(seed).fork(`detail:${cx},${cy}:${epoch}`);
+  const candles = houseRng(seed).fork(`candles:${cx},${cy}:${epoch}`);
   const rooms: Room[] = [];
   for (const slot of layout.slots) {
     if (slot.kind === 'void') continue;
     const kind = slot.kind as FillerKind;
     const cells = slotCells(slot, kind === 'corridor');
-    rooms.push({
+    const room: Room = {
       id: `r:${slot.sx},${slot.sy}:${epoch}`,
       kind,
       size: FILLER_SIZE[kind],
@@ -200,7 +218,9 @@ export function buildChunk(seed: number, layout: ChunkLayout): Chunk {
       cells,
       doors: slot.doors.map((dir) => doorIdOf(edgeKey(slot.sx, slot.sy, dir))),
       ...fillerDetail(rng, slot, kind, cells),
-    });
+    };
+    const spare = kind === 'corridor' ? undefined : spareCandle(candles, room);
+    rooms.push(spare ? { ...room, anchors: [...room.anchors, spare] } : room);
     // A chunk owns the doors on the east and north walls of its slots.
     for (const dir of slot.doors) if (dir === 'E' || dir === 'N') ownDoor(edgeKey(slot.sx, slot.sy, dir));
   }

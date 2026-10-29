@@ -61,9 +61,9 @@ describe('furnishRoom', () => {
     expect(placed).toBeGreaterThan(100);
   });
 
-  it('leaves corridors walkable', () => {
+  it('leaves corridors walkable: nothing but the Act 1 dead end’s candle stand (spec 18)', () => {
     for (const room of roomsFor(7).filter((r) => r.kind === 'corridor' || r.kind === 'act1Corridor')) {
-      expect(furnishRoom(room, 7)).toEqual([]);
+      expect(furnishRoom(room, 7).map((f) => f.kind)).toEqual(room.kind === 'act1Corridor' ? ['candleStand'] : []);
     }
   });
 });

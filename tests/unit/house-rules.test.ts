@@ -72,6 +72,32 @@ describe('key rooms in the built house', () => {
   });
 });
 
+describe('visited key rooms', () => {
+  it('stay where the player found them, with the same cells, through 50 reshuffles (200 seeds)', () => {
+    for (let seed = 0; seed < 200; seed++) {
+      const house = newHouse(seed);
+      const rng = createRng(seed).fork('visited-test');
+      let player = house.startCell;
+      const kept = new Map<string, string>();
+      for (let i = 0; i < 50; i++) {
+        player = wander(house, rng, player, 3);
+        const here = house.roomAt(player);
+        if (here?.kind === 'key' && here.characterId && !kept.has(here.id)) {
+          house.markVisited(here.characterId);
+          kept.set(here.id, JSON.stringify(here.cells));
+        }
+        house.reshuffle(visibleAround(house, player, 2), player);
+        for (const [id, cells] of kept) {
+          const room = house.getRoom(id);
+          expect(room?.kind, `seed ${seed} ${id}`).toBe('key');
+          expect(JSON.stringify(room!.cells)).toBe(cells);
+          expect(house.roomAt(JSON.parse(cells)[0])?.id).toBe(id);
+        }
+      }
+    }
+  }, 60_000);
+});
+
 describe('the front door', () => {
   it('stays sealed until unsealFrontDoor()', () => {
     const house = newHouse(42);
