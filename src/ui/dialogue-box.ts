@@ -68,6 +68,7 @@ export function createDialogue(options: { speaker?: Speaker; onOpenChange?: (ope
     if (!choice || choice.shown || !line?.full) return;
     choice.shown = true;
     more.style.display = 'none';
+    list.classList.toggle('two', choice.options.length === 4 && choice.options.every((o) => o.text.length <= 34));
     list.replaceChildren(
       ...choice.options.map((option, i) => {
         const item = el('li');

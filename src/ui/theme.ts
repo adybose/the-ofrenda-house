@@ -15,15 +15,17 @@ const CSS = `
 .ofr-name { font-variant: small-caps; letter-spacing: 0.08em; color: #d9b46c; }
 
 #dialogue {
-  position: fixed; left: 50%; bottom: 4vh; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: 2.5vh; transform: translateX(-50%);
   width: min(900px, 92vw); box-sizing: border-box; padding: 18px 26px 20px;
   font-size: clamp(17px, 1.15vw + 6px, 26px); line-height: 1.45; z-index: 10; cursor: pointer;
 }
 #dialogue-speaker { font-size: 0.85em; margin-bottom: 0.3em; }
-#dialogue-text { min-height: 2.9em; white-space: pre-wrap; }
+#dialogue-text { min-height: 1.45em; white-space: pre-wrap; }
 #dialogue-more { float: right; color: #d9b46c; animation: ofr-blink 1.1s steps(2, start) infinite; }
 @keyframes ofr-blink { to { visibility: hidden; } }
-#dialogue-options { list-style: none; margin: 0.6em 0 0; padding: 0; }
+#dialogue-options { list-style: none; margin: 0.6em 0 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 0 1em; }
+/* Four short options sit in two columns, so the box doesn't hide the spirit. */
+#dialogue-options.two { grid-template-columns: 1fr 1fr; }
 #dialogue-options button {
   display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
   background: transparent; border: 1px solid transparent; padding: 0.25em 0.5em; margin: 0.1em 0;
