@@ -75,3 +75,7 @@ Vitest: TTS route with a fake Piper, missing Piper, cache hits, voice assignment
   - Pauses are written × the spirit's pitch (`/api/tts` takes `pitch`), so they sound the same after the pitch shift.
   - `PAUSES` are Severo's values less the kept edges: sentence 0.82, ellipsis 1.05, comma 0.36, address 0.16. The cache format went to 6.
 - Measured afterwards with real Piper, as heard (after "dead?", at "Closer, stranger", before "and tell me"): Don Emilio 0.84, 0.15, 0.39; Rafael 0.84, 0.19, 0.41; Doña Esperanza 0.84, 0.18, 0.40; Severo 0.85, 0.15, 0.37; Ernesto 0.84, 0.19, 0.40; Lucía 0.85, 0.19, 0.38; Dr. Pilar 0.83, 0.18, 0.40. La Sombra: 0.16 before "little thief", 0.83 after it. First audio still about 0.8 s uncached.
+- After the fifth listen (29 October 2026): splitting at "Closer," made it a whole utterance, which Piper drew out and let fall like the end of a sentence, so 0.17 s of silence still sounded like a full break; and trimming each phrase cut the breath-out that had made Severo's 0.4 s comma pause feel long. Measured silence was the wrong guide. Now:
+  - A comma that only sets off a short address is left out of the text Piper reads ("Closer stranger,", "…come here little thief."), so the words run on in one breath.
+  - The comma pause is 0.6 s; the sentence pause is unchanged at 0.82 s. The cache format went to 7.
+- Measured afterwards with real Piper, as heard: no gap of 40 ms or more between "Closer" and "stranger" for any spirit, or before La Sombra's "little thief"; 0.60 to 0.69 s before "and tell me"; 0.81 to 0.85 s after "dead?".

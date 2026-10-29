@@ -3,11 +3,10 @@
 // after a comma. Each phrase's own silence is trimmed first, so the pauses are the same on every voice.
 
 /**
- * Seconds of silence heard after each kind of punctuation: Severo's delivery, the listening check's
- * favourite (measured 0.86 s after a sentence, 0.40 s at a comma, 0.17 s at "Closer, stranger"), less
- * the edges `joinWavs` keeps. `address`: a comma that only sets off a short address.
+ * Seconds of silence heard after each kind of punctuation, once each phrase's own silence is trimmed
+ * (`joinWavs`). The comma pause is long enough to be clearly felt: trimmed, 0.36 s sounded rushed.
  */
-export const PAUSES = { sentence: 0.82, ellipsis: 1.05, comma: 0.36, address: 0.16 } as const;
+export const PAUSES = { sentence: 0.82, ellipsis: 1.05, comma: 0.6 } as const;
 
 /** Seconds kept at each end of a phrase when its silence is trimmed, so no consonant is clipped. */
 export const TRIM_KEEP = 0.02;
@@ -34,21 +33,23 @@ const words = (text: string) => text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.
 
 /**
  * A line split into phrases after its punctuation, each with the pause that follows it. A comma that
- * only sets off a short address ("Closer, stranger", "…, little thief.") is said almost in one breath,
- * so it gets the brief `address` pause: one word before it, or just one or two words after it that end
- * the sentence.
+ * only sets off a short address is said in one breath ("Closer, stranger" is "come closer, stranger"),
+ * so it is left out of what Piper reads and the phrase runs on: one word before it, or just one or two
+ * words after it that end the sentence ("…come here, little thief.").
  */
 export function phrases(text: string): Phrase[] {
   const out: Phrase[] = [];
   const marks = [...text.matchAll(BREAK)];
+  /** Address commas inside the current phrase, by index in `text`: dropped when it's added. */
+  let dropped: number[] = [];
   let start = 0;
-  // The word just after an address ("stranger" in "Closer, stranger, and…") is the address itself:
-  // the comma after it is an ordinary one.
-  let afterAddress = false;
   const add = (end: number, pause: number) => {
-    const phrase = text.slice(start, end).trim();
+    let phrase = '';
+    for (let k = start; k < end; k++) if (!dropped.includes(k)) phrase += text[k];
+    phrase = phrase.trim();
     if (/[\p{L}\p{N}]/u.test(phrase)) out.push({ text: phrase, pause });
     start = end;
+    dropped = [];
   };
   marks.forEach((match, i) => {
     const end = match.index + match[0].length;
@@ -56,14 +57,12 @@ export function phrases(text: string): Phrase[] {
       const next = marks[i + 1];
       const after = text.slice(end, next ? next.index + next[0].length : text.length);
       const endsSentence = !next || pauseFor(next[0]) !== PAUSES.comma;
-      if ((words(text.slice(start, end)) <= 1 && !afterAddress) || (endsSentence && words(after) <= 2)) {
-        add(end, PAUSES.address);
-        afterAddress = true;
+      if (words(text.slice(start, end)) <= 1 || (endsSentence && words(after) <= 2)) {
+        dropped.push(match.index);
         return;
       }
     }
     add(end, pauseFor(match[0]));
-    afterAddress = false;
   });
   add(text.length, 0);
   if (out.length) out[out.length - 1]!.pause = 0;

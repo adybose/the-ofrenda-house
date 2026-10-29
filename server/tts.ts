@@ -48,7 +48,7 @@ export interface Tts {
 }
 
 /** Bumped whenever the audio for the same request changes, so old cached WAVs aren't served. */
-const FORMAT = 6;
+const FORMAT = 7;
 
 /** Piper's variation in phoneme timing, below its default of 0.8: an even, measured rhythm. */
 const RHYTHM = 0.6;

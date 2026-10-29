@@ -24,25 +24,21 @@ describe('phrases', () => {
   it('splits after punctuation, keeping it, with a long pause after a sentence and a short one after a comma', () => {
     expect(phrases('Who walks in my house on the night of the dead? Closer, stranger, and tell me why you are here.')).toEqual([
       { text: 'Who walks in my house on the night of the dead?', pause: PAUSES.sentence },
-      // "Come closer, stranger": an address, with only the brief pause Severo's voice gave it.
-      { text: 'Closer,', pause: PAUSES.address },
-      { text: 'stranger,', pause: PAUSES.comma },
+      // "Come closer, stranger": an address, said in one breath, so Piper gets it without the comma.
+      { text: 'Closer stranger,', pause: PAUSES.comma },
       { text: 'and tell me why you are here.', pause: 0 },
     ]);
-    expect(PAUSES.sentence).toBeGreaterThan(PAUSES.comma * 1.8);
-    expect(PAUSES.comma).toBeGreaterThan(PAUSES.address * 2);
+    expect(PAUSES.sentence).toBeGreaterThan(PAUSES.comma);
+    // Clearly longer than the brief address pause (0.16 s) that made "and tell me" feel rushed.
+    expect(PAUSES.comma).toBeGreaterThanOrEqual(0.16 * 3);
   });
 
-  it('gives a short address at the end of a sentence only a brief pause: "…, little thief."', () => {
+  it('runs a short address at the end of a sentence straight on: "…come here little thief."', () => {
     expect(phrases('You should not have come here, little thief. The house remembers every one of you.')).toEqual([
-      { text: 'You should not have come here,', pause: PAUSES.address },
-      { text: 'little thief.', pause: PAUSES.sentence },
+      { text: 'You should not have come here little thief.', pause: PAUSES.sentence },
       { text: 'The house remembers every one of you.', pause: 0 },
     ]);
-    expect(phrases('Run, child.')).toEqual([
-      { text: 'Run,', pause: PAUSES.address },
-      { text: 'child.', pause: 0 },
-    ]);
+    expect(phrases('Run, child.')).toEqual([{ text: 'Run child.', pause: 0 }]);
   });
 
   it('still pauses at a comma between longer clauses', () => {
