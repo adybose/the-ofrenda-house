@@ -105,3 +105,22 @@ test('a clue card toast does not cover the choices', async ({ page }) => {
   expect(toast!.y + toast!.height).toBeLessThan(options!.y);
   await page.screenshot({ path: 'artifacts/screenshots/dialogue-clue-toast.png' });
 });
+
+test('a Journal button opens the journal, shows a dot for a new clue, and the clue pop-up points to the journal', async ({ page }) => {
+  await open(page, '&skip=prologue');
+  const button = page.locator('#journal-button');
+  await expect(button).toBeVisible();
+  await expect(button).toContainText('Journal (J)');
+  await expect(page.locator('#journal-button .badge')).toBeHidden();
+  await page.evaluate(() => window.__dialogue!.giveClues(1));
+  await expect(page.locator('#clue-toast')).toContainText('Kept in your journal (J)');
+  await expect(page.locator('#journal-button .badge')).toBeVisible();
+  await page.screenshot({ path: 'artifacts/screenshots/journal-button.png' });
+  await button.click();
+  await expect(page.locator('#journal')).toBeVisible();
+  await expect(button).toBeHidden();
+  await page.keyboard.press('KeyJ');
+  await expect(page.locator('#journal')).toBeHidden();
+  await expect(button).toBeVisible();
+  await expect(page.locator('#journal-button .badge')).toBeHidden();
+});

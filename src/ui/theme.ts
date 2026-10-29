@@ -61,6 +61,17 @@ const CSS = `
 #journal .empty { opacity: 0.55; font-style: italic; }
 #journal .hint { opacity: 0.6; font-size: 0.85em; }
 
+#journal-button {
+  position: fixed; left: 16px; top: 16px; z-index: 6; cursor: pointer; padding: 5px 12px;
+  font-size: 15px; letter-spacing: 0.04em;
+}
+#journal-button:hover, #journal-button:focus-visible { border-color: rgba(217, 180, 108, 0.9); outline: none; }
+#journal-button .badge {
+  display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%;
+  background: #d9b46c; vertical-align: middle;
+}
+#clue-toast .where { font-size: 0.8em; opacity: 0.75; margin-top: 0.3em; }
+
 .hud-slot {
   position: fixed; z-index: 5; font-family: ${SERIF}; color: #efe4c8; font-size: 15px;
   padding: 4px 10px; background: rgba(0, 0, 0, 0.45); pointer-events: none;
