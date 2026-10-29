@@ -1,6 +1,6 @@
 # The Ofrenda House: spec-driven build plan
 
-We build the game from 16 small specs, each with its own acceptance checks, so Claude Code always works against a written definition of done and we can stop cleanly at any point before the deadline (Saturday 31 October 2026, 11:59 pm Pacific).
+We build the game from small specs, each with its own acceptance checks, so Claude Code always works against a written definition of done and we can stop cleanly at any point before the deadline (Saturday 31 October 2026, 11:59 pm Pacific).
 
 ## How it works
 
@@ -37,7 +37,7 @@ The loop for each spec:
 ```text
 the-ofrenda-house/
   CLAUDE.md              the constitution
-  specs/                 one file per spec, 00 to 15
+  specs/                 one file per spec, 00 to 22
     _template.md
   docs/
     story.md             story bible
@@ -50,10 +50,11 @@ the-ofrenda-house/
     lighting/            flashlight, lightning, fog
     audio/               synths, spatial sound, reverb
     player/              movement, collision, interaction
+    items/               candles, matches, keys (spec 18)
     spirits/             ghosts, encounters, the Shadow
     scares/              bats, rats, cats, triggers
     ui/                  dialogue box, choices, journal, HUD
-    story/               prologue, chase, ofrenda, endings
+    story/               prologue, chase, encounters, monologue, dawn, endings
   server/
     llm.ts               Ollama client, prompts, schemas
     tts.ts               Piper wrapper
@@ -80,7 +81,7 @@ Three terminal tabs: Ollama, `npm run dev` (game and local server, from spec 00 
 
 ## The specs
 
-There are 16 specs, and every one is needed for the full game. Inside each spec, the checks are split into Must and Should, so if time runs short we can ship once the Must checks pass.
+There are 23 specs (00 to 22), and every one is needed for the full game. Inside each spec, the checks are split into Must and Should, so if time runs short we can ship once the Must checks pass.
 
 | # | Spec | Depends on | Key acceptance checks |
 | --- | --- | --- | --- |
@@ -96,10 +97,17 @@ There are 16 specs, and every one is needed for the full game. Inside each spec,
 | 09 | Spirit voices | 07, 08 | Piper speaks each line with a voice per spirit, pitched and echoed; text appears even if text-to-speech is missing |
 | 10 | Dialogue and journal UI | 08 | Typewriter text with 3 or 4 choices picked by click or keys 1 to 4; trust is tracked; J opens the clue journal |
 | 11 | Spirits and encounters | 06, 10 | Translucent ghosts with a noise shader; the encounter steps run in order (appear, who are you, riddle, reward or silence); the killer's friendly form tells exactly one lie |
-| 12 | The Shadow and hazards | 03, 06, 11 | Pathfinds to the player and grows bolder after failed riddles; marigold petals block it; falling chandelier, slamming door and lights dying; being caught triggers the possessed ending |
+| 12 | The Shadow and hazards | 03, 06, 11, 17, 18 | Pathfinds to the player and grows bolder after failed riddles; threatens a player in light and chases one in the dark; never enters a lit sanctuary; falling chandelier, slamming door and lights dying; being caught triggers the possessed ending |
 | 13 | Jump scares | 06, 07 | Bats, rats and cats are low-poly meshes animated in code; placed triggers fire with a sound stinger; a cooldown stops scares piling up |
-| 14 | Story flow and endings | 11, 12 | Prologue door lock; Act 1 chase with the patriarch; the ofrenda accusation; true, escape, possessed and trapped endings |
+| 14 | Story flow and endings | 11, 12, 13, 18, 20, 21 | Prologue door lock; Act 1 chase with the patriarch; the clock to dawn; true, escape, possessed and trapped endings |
 | 15 | Release and write-up | All | README with offline setup; one-command start; demo video; DEV post draft in `docs/post.md` |
+| 16 | Exterior and arrival | 04, 05, 06, 07 | The storm outside, the walk up to the door, the door opening and slamming |
+| 17 | Torch battery | 06 | Starts at 60–70%, dims and flickers as it fades, cuts out when critical, never charges above 10% |
+| 18 | Candles, matches and keys | 03, 05, 06, 10, 11, 17 | Unlit candles under each portrait; a candle and matchbox at the Act 1 dead end; finite matches; candles burn out; a solved spirit's candle lights itself; keys laid beside it |
+| 19 | Spirit presence | 11 | A halo visible in the dark; floating; coming and going through walls |
+| 20 | Inner monologue | 10, 17, 18 | Hand-written thoughts on screen as hints, once each, queued, never during encounters |
+| 21 | Naming the killer | 02, 07, 08, 11, 18, 19 | With enough clues, solved spirits ask who did it, laugh, and leave the exit key or another room's key; the dining room finale |
+| 22 | Dawn | 03, 14, 21 | The patriarch's last question at dawn; the walls stop and petals lead back to the front door, or the player is trapped |
 
 ## Build order
 
@@ -107,8 +115,8 @@ There are 16 specs, and every one is needed for the full game. Inside each spec,
 | --- | --- | --- |
 | Wed 28 | Specs and scaffold | Draft all 16 specs, 00, 01 |
 | Thu 29 | The world | 02 (parallel session), 03, 04, 05, 06, 07 |
-| Fri 30 | The haunting | 08 (parallel session), 09, 10, 11, 12, 13, 14. Feature freeze at night |
-| Sat 31 | Ship it | Bug fixes, 15, demo video, DEV post, submit by 11:59 pm Pacific |
+| Fri 30 | The haunting | 08 (parallel session), 09, 10, 11; then, after the design update on Thu 29 (specs 17 to 22): 17, 18, 19, 12, 21, 20 |
+| Sat 31 | Ship it | 13, 14, 22, then bug fixes, 15, demo video, DEV post, submit by 11:59 pm Pacific. If time runs short, cut first: 13's Should checks, 20's follow-up hints, 22's petal trail (a thought instead) |
 
 Specs 02 and 08 are pure logic with no 3D code, so they can run in a second Claude Code session in its own git worktree while the main session builds the world.
 

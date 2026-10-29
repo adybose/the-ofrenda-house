@@ -1,6 +1,6 @@
 # 15: Release and write-up
 Status: Approved
-Depends on: 00 to 14
+Depends on: 00 to 14, 16 to 22
 
 ## Goal
 Anyone can clone the repo, run one command and play offline, and the DEV post tells the story of how the game was built.
@@ -11,7 +11,7 @@ Anyone can clone the repo, run one command and play offline, and the DEV post te
 - THE SYSTEM SHALL make no request outside localhost from the production build.
 - THE SYSTEM SHALL include a licence (MIT unless decided otherwise).
 - THE SYSTEM SHALL include a GitHub Actions workflow running `npm ci`, `npm run check` and `npm run e2e` with the mocks. The human creates the public GitHub repo, adds the remote and pushes; Claude Code does not push without being asked.
-- THE SYSTEM SHALL have a 60 to 120 second demo video showing the prologue, an encounter, a Shadow chase and an ending, linked from the README.
+- THE SYSTEM SHALL have a 60 to 120 second demo video showing the prologue, an encounter, a match and a candle in the dark, a Shadow chase and an ending, linked from the README.
 - THE SYSTEM SHALL have a draft DEV post in `docs/post.md` in the DEV challenge template, written from `docs/story.md`, the specs and the git history.
 - Every spec SHALL be Done, or have its cut Must checks recorded in the spec.
 
