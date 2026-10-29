@@ -20,6 +20,8 @@ import { createPlayerState } from './player/movement';
 import { createExteriorScene } from './render/exterior-mesh';
 import { Arrival } from './story/arrival';
 import { Encounters } from './story/encounters';
+import { EXIT_KEY } from './story/accusation';
+import { Finale } from './story/finale';
 import { ItemsController } from './items/controller';
 import { Hazards } from './spirits/hazards';
 import { ShadowController } from './spirits/shadow-controller';
@@ -225,7 +227,8 @@ async function startGame(): Promise<void> {
   let journal: Journal | undefined = undefined;
   let encounters: Encounters | undefined = undefined;
   let caught = false;
-  const syncControls = () => player.setControlsEnabled(!caught && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
+  let finale: Finale | undefined = undefined;
+  const syncControls = () => player.setControlsEnabled(!caught && !finale?.isActive() && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
   const dialogue = createDialogue({ speaker: speakerFor(audio), onOpenChange: syncControls, inputBlocked: () => journal?.isOpen() ?? false });
   journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
 
@@ -247,7 +250,23 @@ async function startGame(): Promise<void> {
       if (outcome === 'reward') items.spiritSolved(characterId);
       items.layKeys(characterId, keyIds);
     },
+    allClues: url.searchParams.get('clues') === 'all',
   });
+
+  // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it
+  // plays the finale and the ending.
+  finale = new Finale({
+    seed,
+    caseFile,
+    house,
+    scene,
+    player,
+    dialogue,
+    hasKey: (keyId) => keys.has(keyId),
+    toldTheTruth: () => encounters!.trust.toldTheTruth,
+    onActiveChange: syncControls,
+  });
+  events.on('playerCellChanged', ({ cell }) => finale!.enterCell(cell));
 
   // What the player carries, on the HUD, and the keys into their pocket and journal (spec 18).
   const showCarried = () => {
@@ -259,6 +278,11 @@ async function startGame(): Promise<void> {
   events.on('keyPickedUp', ({ keyId }) => {
     keys.add(keyId);
     journal!.addKey(keyId);
+    if (keyId !== EXIT_KEY) return;
+    const { x, z, yaw } = player.state();
+    const cell = worldToCell(x, z);
+    const quarter = Math.round((((yaw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / (Math.PI / 2)) % 4;
+    applyDiff(house.revealDiningRoom(visibleCells(cell), cell, (['N', 'W', 'S', 'E'] as const)[quarter]!, EXIT_KEY));
   });
   for (const name of ['itemPickedUp', 'matchStruck', 'candleLit', 'candleOut', 'candlePlaced', 'keyPickedUp'] as const) events.on(name, showCarried);
   let carriedCheck = 0;
@@ -282,7 +306,7 @@ async function startGame(): Promise<void> {
     player,
     scene,
     caption: createCaption(),
-    suppressed: () => caught || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+    suppressed: () => caught || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
   if (skip === 'act1' && url.searchParams.get('shadow') !== '0') shadow.enable();
@@ -360,7 +384,8 @@ async function startGame(): Promise<void> {
       }
       encounters.update(dt, time / 1000);
       shadow.update(dt, time / 1000);
-      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
+      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
+      finale!.update(dt, time / 1000);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);

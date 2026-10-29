@@ -48,7 +48,8 @@ export interface House {
   pinCells(cells: readonly CellId[]): void;
   shiftCorridorBehind(): ChunkDiff;
   endAct1(): void;
-  revealDiningRoom(visible: ReadonlySet<CellId>, playerCell: CellId, facing: Dir): ChunkDiff;
+  /** Spec 21: with `lockedBy`, its doors are locked until opened with that key (the exit key). */
+  revealDiningRoom(visible: ReadonlySet<CellId>, playerCell: CellId, facing: Dir, lockedBy?: string): ChunkDiff;
   unsealFrontDoor(): void;
   /** The door slams and locks behind the player (spec 16); only the ending opens it again. */
   sealFrontDoor(): void;
@@ -134,6 +135,9 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
   const removedEdges = new Set<string>();
   const pinned = new Set<CellId>();
   const heldShut = new Set<DoorId>();
+  /** The dining room's doors and the key that opens them (spec 21). */
+  const diningDoors = new Set<DoorId>();
+  let diningKey: string | undefined;
   let diningSlot: [number, number] | undefined;
   let reshuffles = 0;
   const keyRooms = lockPlan(root.fork('locks'), caseFile);
@@ -274,6 +278,7 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
     const doors = base.doors.map((door) => {
       const state = doorStates.get(door.id) ?? door.state;
       const owner = keyRooms.find((k) => k.doorId === door.id && k.locked);
+      if (state === 'locked' && diningKey && diningDoors.has(door.id)) return { ...door, state, keyId: diningKey };
       return owner && state === 'locked' ? { ...door, state, keyId: owner.keyId } : { ...door, state };
     });
     const chunk: Chunk = { ...base, rooms, doors };
@@ -536,7 +541,7 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       setDoorState(doorIdOf(ACT1_EXIT_EDGE), 'closed');
     },
 
-    revealDiningRoom(visible, playerCell, facing) {
+    revealDiningRoom(visible, playerCell, facing, lockedBy) {
       if (diningSlot) return { loaded: [], unloaded: [] };
       const guarded = protectedSlots(visible, playerCell);
       const [px, py] = parseCell(playerCell);
@@ -566,6 +571,17 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       // A key room can't share the slot, and the dining room's chunk never reshuffles again.
       overrides.set(pack(best.sx, best.sy), { type: 'dining' });
       diningSlot = [best.sx, best.sy];
+      if (lockedBy) {
+        diningKey = lockedBy;
+        for (const dir of slotAt(best.sx, best.sy).doors) {
+          const doorId = doorIdOf(edgeKey(best.sx, best.sy, dir));
+          // A spirit's room opening off it keeps its own door and key.
+          if (keyRooms.some((k) => k.doorId === doorId)) continue;
+          diningDoors.add(doorId);
+          doorStates.set(doorId, 'locked');
+          markDirty(...doorOwnerChunk(doorId));
+        }
+      }
       markDirty(...chunkOfSlot(best.sx, best.sy));
       return refreshLoaded();
     },

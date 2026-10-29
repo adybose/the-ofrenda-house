@@ -5,7 +5,7 @@ import { events } from '../core/events';
 import { STREAMS, createRng } from '../core/rng';
 import { fetchLine, prefetchLines, type LineQuery } from '../dialogue/lines';
 import { draw } from '../dialogue/replies';
-import { applyReply, initialTrust, STARTING_TRUST, type TrustState } from '../dialogue/trust';
+import { applyReply, initialTrust, STARTING_TRUST, trustBucket, type TrustState } from '../dialogue/trust';
 import { assignVoices } from '../dialogue/voices';
 import type { Flashlight } from '../lighting/flashlight';
 import type { PlayerController } from '../player/controller';
@@ -18,6 +18,7 @@ import type { House } from '../world/house';
 import type { CellId, Room } from '../world/types';
 import { CELL_SIZE, WALL_INSET, cellCentre } from '../world/units';
 import { DIR_STEP } from '../world/grid';
+import { ACCUSE_LINES, EXIT_KEY, LAUGH_LINE, accusationKey, accusationOptions, enoughClues } from './accusation';
 import { encounterReducer, encounterSetup, startEncounter, type EncounterEmit, type EncounterEvent, type EncounterState } from './encounter';
 
 declare module '../core/events' {
@@ -30,6 +31,10 @@ declare module '../core/events' {
     riddleFailed: { characterId: CharacterId };
     /** True while an encounter runs: the Shadow and the scares hold off (specs 12 and 13). */
     encounterActive: { active: boolean };
+    /** Spec 21: the player named someone as the killer to a spirit. */
+    accused: { characterId: CharacterId; accusedId: CharacterId; correct: boolean };
+    spiritLaughed: { characterId: CharacterId };
+    exitKeyAwarded: Record<string, never>;
   }
 }
 
@@ -66,6 +71,8 @@ export interface EncountersOptions {
   onActiveChange(active: boolean): void;
   /** Called once the spirit has gone: its candle lights on a reward, and its keys are laid on its table (spec 18). */
   onSpiritLeft?(left: { characterId: CharacterId; outcome: 'reward' | 'silence'; keyIds: readonly string[] }): void;
+  /** Debug (`&clues=all`): count every clue as held, so the first spirit set at peace asks who did it. */
+  allClues?: boolean;
 }
 
 interface Active {
@@ -89,6 +96,11 @@ export class Encounters {
   private readonly resolved = new Set<CharacterId>();
   private readonly prefetched = new Set<CharacterId>();
   private trustState: TrustState = initialTrust();
+  /** Spec 21: the clues held, the riddles solved, whether the killer has been named, and the keys handed out. */
+  private readonly held = new Set<string>();
+  private solvedCount = 0;
+  private killerNamed = false;
+  private readonly given = new Set<string>();
   private active: Active | undefined;
   private leaving: { spirit: Spirit; gone(): void }[] = [];
   /** Where the current spirit came through the wall from, and where it stopped (debug). */
@@ -98,6 +110,12 @@ export class Encounters {
   constructor(options: EncountersOptions) {
     this.options = options;
     this.voices = assignVoices(options.seed, options.caseFile.characters);
+    if (options.allClues) for (const fact of options.caseFile.facts) this.held.add(fact.id);
+  }
+
+  /** Whether the player has named the killer to a spirit (spec 21; spec 22 asks at dawn otherwise). */
+  named(): boolean {
+    return this.killerNamed;
   }
 
   /** The player's standing with every spirit, and whether they've ever lied (spec 14's true ending). */
@@ -260,18 +278,39 @@ export class Encounters {
 
     const outcome = this.state().step;
     await say((await ask(outcome === 'reward' ? 'reward' : 'silence')).line);
+    if (outcome === 'reward') this.solvedCount++;
+
+    // Its own keys first (never one already handed out), so an answer's key is never the same one.
+    const ownKeys = this.state().keyIds.filter((k) => !this.given.has(k));
+    for (const keyId of ownKeys) this.given.add(keyId);
+    // Spec 21: with enough clues, a spirit set at peace asks who did it, and laughs at the answer.
+    let extraKey: string | undefined;
+    if (outcome === 'reward' && !this.killerNamed && enoughClues(caseFile, [...this.held], this.solvedCount)) {
+      void say(ACCUSE_LINES[trustBucket(this.state().trust)]);
+      const names = accusationOptions(caseFile).map((id) => ({ id, text: caseFile.characters.find((c) => c.id === id)!.name }));
+      const accusedId = (await dialogue.choose(names)) as CharacterId;
+      const correct = accusedId === caseFile.killerId;
+      if (correct) this.killerNamed = true;
+      events.emit('accused', { characterId: character.id, accusedId, correct });
+      audio.play('laugh', { position: [spirit.position.x, 1.6, spirit.position.z], gain: 1.3 });
+      events.emit('spiritLaughed', { characterId: character.id });
+      await dialogue.say({ speaker: character.name, line: LAUGH_LINE });
+      extraKey = accusationKey({ correct, locked: house.keyRooms(), given: this.given });
+    }
     this.dispatch({ type: 'ended' });
     dialogue.close();
 
     // It leaves through the nearest wall, fading, at peace or in silence (spec 19). Once it has gone
     // its keys lie by its candle, whichever it was, so a locked room never becomes unreachable
-    // (spec 18), and a solved spirit's candle lights.
-    const keyIds = this.state().keyIds;
+    // (spec 18), and a solved spirit's candle lights. A key already handed out isn't laid twice.
+    const keyIds = extraKey ? [...ownKeys, extraKey] : ownKeys;
+    if (extraKey) this.given.add(extraKey);
     void spirit.drift(spirit.position.clone(), throughNearestWall(room, spirit.position), FADE_OUT);
     this.leaving.push({
       spirit,
       gone: () => {
         for (const keyId of keyIds) events.emit('keyAwarded', { keyId });
+        if (keyIds.includes(EXIT_KEY)) events.emit('exitKeyAwarded', {});
         this.options.onSpiritLeft?.({ characterId: character.id, outcome: outcome === 'reward' ? 'reward' : 'silence', keyIds });
       },
     });
@@ -303,6 +342,7 @@ export class Encounters {
         case 'clueAwarded': {
           const fact = caseFile.facts.find((f) => f.id === emit.factId);
           if (fact) journal.addClue(clueCardFrom(fact));
+          this.held.add(emit.factId);
           events.emit('clueAwarded', { factId: emit.factId });
           break;
         }
