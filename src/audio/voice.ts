@@ -29,7 +29,7 @@ export function createSpeaker<B extends { duration: number }>(deps: SpeakerDeps<
       const response = await deps.fetch('/api/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: voice.voiceId, rate: lengthScale(voice) }),
+        body: JSON.stringify({ text, voiceId: voice.voiceId, rate: lengthScale(voice), expression: voice.expression }),
       });
       if (!response.ok) return undefined;
       return await deps.decode(await response.arrayBuffer());
@@ -42,7 +42,7 @@ export function createSpeaker<B extends { duration: number }>(deps: SpeakerDeps<
     async speak(line, voice, position) {
       const text = line.trim();
       if (!text) return { spoken: false };
-      const key = JSON.stringify([voice.voiceId, lengthScale(voice), text]);
+      const key = JSON.stringify([voice.voiceId, lengthScale(voice), voice.expression, text]);
       let pending = decoded.get(key);
       if (!pending) {
         pending = load(text, voice);

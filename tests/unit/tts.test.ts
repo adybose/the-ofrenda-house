@@ -28,17 +28,26 @@ function tinyWav(): Buffer {
   return wav;
 }
 
-/** A fake `piper` on PATH: logs its arguments and stdin, optionally sleeps, then writes the tiny WAV to -f. */
+/**
+ * A fake `piper` on PATH, like Piper 1.8 with -d: logs its arguments, optionally sleeps, then writes
+ * the tiny WAV into the -d folder once per stdin line, logging each line. Files are numbered from 9,
+ * so 10.wav sorts before 9.wav as text: the server must order them by number.
+ */
 const FAKE_PIPER = `#!/bin/sh
 echo "$@" >> "$FAKE_PIPER_LOG"
-cat >> "$FAKE_PIPER_LOG.text"
-out=""
+dir=""
 while [ $# -gt 0 ]; do
-  if [ "$1" = "-f" ]; then out="$2"; shift; fi
+  if [ "$1" = "-d" ]; then dir="$2"; shift; fi
   shift
 done
 if [ -n "$FAKE_PIPER_SLEEP" ]; then sleep "$FAKE_PIPER_SLEEP"; fi
-cp "$FAKE_PIPER_WAV" "$out"
+mkdir -p "$dir"
+n=9
+while IFS= read -r line || [ -n "$line" ]; do
+  echo "$line" >> "$FAKE_PIPER_LOG.text"
+  cp "$FAKE_PIPER_WAV" "$dir/$n.wav"
+  n=$((n+1))
+done
 `;
 
 let dir: string;
@@ -88,16 +97,30 @@ const tts = (s: ReturnType<typeof buildServer>, payload: Record<string, unknown>
 const log = async () => (await readFile(join(dir, 'log'), 'utf8')).trim().split('\n').filter(Boolean);
 
 describe('POST /api/tts', () => {
-  it('runs Piper with the right model and rate, and returns audio/wav', async () => {
+  it('runs Piper with the right model, rate and expression, and returns audio/wav', async () => {
     const s = server();
-    const response = await tts(s, { text: 'Who walks in my house?', voiceId: 'en_US-ryan-medium', rate: 1.15 });
+    const response = await tts(s, { text: 'Who walks in my house?', voiceId: 'en_US-ryan-medium', rate: 1.15, expression: 0.82 });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toBe('audio/wav');
     expect(response.rawPayload.subarray(0, 4).toString()).toBe('RIFF');
     const [args] = await log();
     expect(args).toContain(`-m ${join(dir, 'en_US-ryan-medium.onnx')}`);
     expect(args).toContain('--length-scale 1.15');
+    expect(args).toContain('--noise-scale 0.82');
+    expect(args).toContain('--noise-w-scale 1');
+    expect(args).toMatch(/-d \S+/);
     expect(await readFile(join(dir, 'log.text'), 'utf8')).toContain('Who walks in my house?');
+  });
+
+  it('speaks a line phrase by phrase, one Piper run, with pauses: long after a question, short after a comma', async () => {
+    const s = server();
+    const response = await tts(s, { text: 'Who walks here? Closer, stranger.', voiceId: 'en_US-ryan-medium' });
+    expect(response.statusCode).toBe(200);
+    expect(await log()).toHaveLength(1);
+    expect((await readFile(join(dir, 'log.text'), 'utf8')).trim().split('\n')).toEqual(['Who walks here?', 'Closer,', 'stranger.']);
+    const wav = response.rawPayload;
+    const tiny = 64 * 2;
+    expect(wav.readUInt32LE(40)).toBe(3 * tiny + (Math.round(0.85 * 22_050) + Math.round(0.4 * 22_050)) * 2);
   });
 
   it('serves a repeated line from the disk cache without running Piper again', async () => {
@@ -159,12 +182,13 @@ describe('prefetching speech', () => {
     for (const args of await log()) {
       expect(args).toContain(`${voice.voiceId}.onnx`);
       expect(args).toContain(`--length-scale ${Math.round(voice.rate * voice.pitch * 100) / 100}`);
+      expect(args).toContain(`--noise-scale ${voice.expression}`);
     }
     const spoken = await readFile(join(dir, 'log.text'), 'utf8');
     expect(spoken).toContain('Who walks in my house');
     expect(spoken).toContain('I keep the hours');
     // The client's later request for the same line is a cache hit.
-    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: Math.round(voice.rate * voice.pitch * 100) / 100 });
+    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: Math.round(voice.rate * voice.pitch * 100) / 100, expression: voice.expression });
     expect(response.statusCode).toBe(200);
     expect(await log()).toHaveLength(2);
   });

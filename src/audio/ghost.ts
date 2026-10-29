@@ -1,11 +1,10 @@
 import type { VoiceSpec } from '../dialogue/voices';
-import { createRng } from '../core/rng';
 import type { Vec3 } from './engine';
-import { whiteNoise } from './noise';
 
 // A spirit's voice made ghostly (spec 09): pitched by playback rate, band-limited like a voice heard
 // through a wall, with an echo trailing behind it; the voice bus adds the room's reverb. La Sombra is
-// pitched far down and darker, with a breathy whisper riding the shape of its words.
+// pitched far down and darker, its voice doubled by a second, slightly lower one just behind it, with a
+// long dark echo. No noise: an earlier breath layer sounded like radio static.
 
 /** The whole chain's level: Piper normalises speech near full scale, and the echo adds to it. */
 const LEVEL = 0.6;
@@ -41,36 +40,23 @@ function spirit(ctx: BaseAudioContext, source: AudioNode, out: AudioNode): void 
   delayLine(ctx, band, out, 0.23, 0.35, 2500, 0.4);
 }
 
-const noiseCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+/** La Sombra's double: the same words a shade lower and a beat behind, like two throats at once. */
+const DOUBLE = { pitch: 0.985, delay: 0.025, level: 0.7 };
 
-function shadow(ctx: BaseAudioContext, source: AudioNode, out: AudioNode, at: number, seconds: number): void {
-  const dark = filter(ctx, 'lowpass', 2500);
+function shadow(ctx: BaseAudioContext, source: AudioNode, double: AudioNode, out: AudioNode): void {
+  const dark = ctx.createGain();
   source.connect(dark);
+  const late = ctx.createDelay(0.1);
+  late.delayTime.value = DOUBLE.delay;
+  const doubleLevel = ctx.createGain();
+  doubleLevel.gain.value = DOUBLE.level;
+  double.connect(late).connect(doubleLevel).connect(dark);
+  const band = filter(ctx, 'lowpass', 2200);
+  dark.connect(filter(ctx, 'highpass', 80)).connect(band);
   const dry = ctx.createGain();
-  dry.gain.value = 0.6;
-  dark.connect(dry).connect(out);
-  // The whisper: breath whose loudness follows the words (rectified and smoothed into its gain).
-  let buffer = noiseCache.get(ctx);
-  if (!buffer) {
-    buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-    buffer.copyToChannel(whiteNoise(createRng(31), buffer.length) as Float32Array<ArrayBuffer>, 0);
-    noiseCache.set(ctx, buffer);
-  }
-  const breath = ctx.createBufferSource();
-  breath.buffer = buffer;
-  breath.loop = true;
-  const whisper = ctx.createGain();
-  whisper.gain.value = 0;
-  breath.connect(filter(ctx, 'bandpass', 3500, 0.7)).connect(whisper).connect(out);
-  const rectify = ctx.createWaveShaper();
-  rectify.curve = Float32Array.from({ length: 257 }, (_, i) => Math.abs(i / 128 - 1));
-  const follow = filter(ctx, 'lowpass', 30);
-  const depth = ctx.createGain();
-  depth.gain.value = 3;
-  source.connect(rectify).connect(follow).connect(depth).connect(whisper.gain);
-  breath.start(at);
-  breath.stop(at + seconds + 0.1);
-  delayLine(ctx, dark, out, 0.38, 0.45, 1500, 0.5);
+  dry.gain.value = 0.55;
+  band.connect(dry).connect(out);
+  delayLine(ctx, band, out, 0.38, 0.45, 1500, 0.45);
 }
 
 /**
@@ -96,8 +82,15 @@ export function ghostVoice(ctx: BaseAudioContext, buffer: AudioBuffer, voice: Vo
     level.connect(out);
   }
   const seconds = buffer.duration / voice.pitch;
-  if (voice.shadow) shadow(ctx, source, level, at, seconds);
-  else spirit(ctx, source, level);
+  if (voice.shadow) {
+    const double = ctx.createBufferSource();
+    double.buffer = buffer;
+    double.playbackRate.value = voice.pitch * DOUBLE.pitch;
+    shadow(ctx, source, double, level);
+    double.start(at);
+  } else {
+    spirit(ctx, source, level);
+  }
   source.start(at);
   return seconds;
 }

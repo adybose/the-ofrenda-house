@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync } from 'node:fs';
-import { access, constants, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { access, constants, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { VOICES } from '../src/dialogue/voices';
+import { joinWavs, phrases } from './speech';
 
 /**
  * Piper text-to-speech, run locally (spec 09). Every failure (no Piper, no model, an error, too slow)
@@ -26,13 +27,22 @@ export interface TtsOptions {
 export interface Tts {
   available(): Promise<boolean>;
   knows(voiceId: unknown): voiceId is string;
-  /** WAV bytes for the line, from the disk cache or a fresh Piper run; `undefined` if speech is unavailable. */
-  synthesize(text: string, voiceId: string, lengthScale: number): Promise<Buffer | undefined>;
+  /**
+   * WAV bytes for the line, from the disk cache or a fresh Piper run; `undefined` if speech is
+   * unavailable. `lengthScale` sets the pace, `expression` how much the intonation varies.
+   */
+  synthesize(text: string, voiceId: string, lengthScale: number, expression: number): Promise<Buffer | undefined>;
   /** The same, behind any live request, without waiting for it. */
-  prefetch(text: string, voiceId: string, lengthScale: number): void;
+  prefetch(text: string, voiceId: string, lengthScale: number, expression: number): void;
   /** Resolves when nothing is queued or running (for tests). */
   idle(): Promise<void>;
 }
+
+/** Bumped whenever the audio for the same request changes, so old cached WAVs aren't served. */
+const FORMAT = 2;
+
+/** Piper's variation in phoneme timing (rhythm), up from its default of 0.8 for a less even delivery. */
+const RHYTHM = 1;
 
 /** pip's per-user script folders on a Mac (and Linux), where `piper` lands. */
 function pythonUserBins(): string[] {
@@ -86,12 +96,18 @@ export function createTts(options: TtsOptions): Tts {
 
   const model = (voiceId: string) => join(options.voicesDir, `${voiceId}.onnx`);
 
-  async function run(text: string, voiceId: string, lengthScale: number, target: string): Promise<Buffer | undefined> {
+  /**
+   * One Piper run for the whole line: one phrase per stdin line, which Piper 1.8 writes as one WAV each
+   * into a folder (`-d`), named by a clock so they sort in order. They're joined with the pauses.
+   */
+  async function run(text: string, voiceId: string, lengthScale: number, expression: number, target: string): Promise<Buffer | undefined> {
     const bin = await findBin();
-    if (!bin) return undefined;
-    const temp = `${target}.${process.pid}.${++runs}.part`;
+    const parts = phrases(text);
+    if (!bin || !parts.length) return undefined;
+    const folder = `${target}.${process.pid}.${++runs}.parts`;
     const ok = await new Promise<boolean>((resolve) => {
-      const child = spawn(bin, ['-m', model(voiceId), '-f', temp, '--length-scale', String(lengthScale)], { env: options.env, stdio: ['pipe', 'ignore', 'ignore'] });
+      const args = ['-m', model(voiceId), '-d', folder, '--length-scale', String(lengthScale), '--noise-scale', String(expression), '--noise-w-scale', String(RHYTHM)];
+      const child = spawn(bin, args, { env: options.env, stdio: ['pipe', 'ignore', 'ignore'] });
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
         resolve(false);
@@ -105,18 +121,21 @@ export function createTts(options: TtsOptions): Tts {
         resolve(code === 0);
       });
       child.stdin.on('error', () => undefined);
-      child.stdin.end(text);
+      child.stdin.end(parts.map((p) => p.text).join('\n') + '\n');
     });
     try {
       if (!ok) return undefined;
-      const wav = await readFile(temp);
-      if (wav.subarray(0, 4).toString() !== 'RIFF') return undefined;
-      await rename(temp, target);
+      const files = (await readdir(folder)).filter((f) => f.endsWith('.wav')).sort((a, b) => Number(a.slice(0, -4)) - Number(b.slice(0, -4)));
+      if (files.length !== parts.length) return undefined;
+      const wav = joinWavs(await Promise.all(files.map((f) => readFile(join(folder, f)))), parts.map((p) => p.pause));
+      // Written beside the target and renamed, so a killed run never leaves half a file in the cache.
+      await writeFile(`${folder}.wav`, wav);
+      await rename(`${folder}.wav`, target);
       return wav;
     } catch {
       return undefined;
     } finally {
-      await rm(temp, { force: true });
+      await rm(folder, { recursive: true, force: true });
     }
   }
 
@@ -133,8 +152,8 @@ export function createTts(options: TtsOptions): Tts {
     }
   }
 
-  function request(text: string, voiceId: string, lengthScale: number, priority: 'live' | 'prefetch'): Promise<Buffer | undefined> {
-    const key = createHash('sha256').update(JSON.stringify([voiceId, lengthScale, text])).digest('hex');
+  function request(text: string, voiceId: string, lengthScale: number, expression: number, priority: 'live' | 'prefetch'): Promise<Buffer | undefined> {
+    const key = createHash('sha256').update(JSON.stringify([FORMAT, voiceId, lengthScale, expression, text])).digest('hex');
     const pending = inFlight.get(key);
     if (pending) return pending;
     const target = join(options.cacheDir, `${key}.wav`);
@@ -146,7 +165,7 @@ export function createTts(options: TtsOptions): Tts {
       }
       await mkdir(options.cacheDir, { recursive: true });
       return new Promise<Buffer | undefined>((resolve) => {
-        (priority === 'live' ? live : prefetches).push({ run: () => run(text, voiceId, lengthScale, target), resolve });
+        (priority === 'live' ? live : prefetches).push({ run: () => run(text, voiceId, lengthScale, expression, target), resolve });
         pump();
       });
     })().finally(() => inFlight.delete(key));
@@ -169,9 +188,9 @@ export function createTts(options: TtsOptions): Tts {
       return true;
     },
     knows: (voiceId): voiceId is string => VOICES.some((v) => v.id === voiceId),
-    synthesize: (text, voiceId, lengthScale) => request(text, voiceId, lengthScale, 'live'),
-    prefetch(text, voiceId, lengthScale) {
-      void request(text, voiceId, lengthScale, 'prefetch');
+    synthesize: (text, voiceId, lengthScale, expression) => request(text, voiceId, lengthScale, expression, 'live'),
+    prefetch(text, voiceId, lengthScale, expression) {
+      void request(text, voiceId, lengthScale, expression, 'prefetch');
     },
     async idle() {
       while (inFlight.size > 0) await Promise.allSettled([...inFlight.values()]);

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSpeaker } from '../../src/audio/voice';
 import { SHADOW_VOICE, lengthScale, type VoiceSpec } from '../../src/dialogue/voices';
 
-const VOICE: VoiceSpec = { voiceId: 'en_US-lessac-medium', pitch: 0.9, rate: 1.1 };
+const VOICE: VoiceSpec = { voiceId: 'en_US-lessac-medium', pitch: 0.9, rate: 1.1, expression: 0.8 };
 
 const okResponse = () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) });
 
@@ -20,7 +20,7 @@ describe('speak()', () => {
     expect(result).toEqual({ spoken: true, durationMs: Math.round((1.8 / 0.9) * 1000) });
     const [url, init] = fetch.mock.calls[0]! as unknown as [string, { body: string }];
     expect(url).toBe('/api/tts');
-    expect(JSON.parse(init.body)).toEqual({ text: 'Who walks in my house?', voiceId: VOICE.voiceId, rate: lengthScale(VOICE) });
+    expect(JSON.parse(init.body)).toEqual({ text: 'Who walks in my house?', voiceId: VOICE.voiceId, rate: lengthScale(VOICE), expression: 0.8 });
     expect(play).toHaveBeenCalledWith({ duration: 1.8 }, VOICE, [1, 2, 3]);
   });
 

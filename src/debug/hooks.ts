@@ -50,7 +50,7 @@ export interface OfrendaDebug {
   masterGain(): number;
   testVoice(seconds: number): void;
   /** A voice-like test WAV through the spirit or La Sombra ghost chain, offline (spec 09). */
-  renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; hasNaN: boolean }>;
+  renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; flatness: number; hasNaN: boolean }>;
   setTension(level: number): void;
   audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
   setOutdoors(on: boolean): void;
@@ -206,7 +206,7 @@ export function installDebugHooks(options: {
     masterGain: () => options.audio.levels().master,
     testVoice: (seconds) => options.audio.testVoice(seconds),
     async renderGhostVoice(kind) {
-      const voice = kind === 'shadow' ? SHADOW_VOICE : { voiceId: 'en_US-lessac-medium', pitch: 0.9, rate: 1.1 };
+      const voice = kind === 'shadow' ? SHADOW_VOICE : { voiceId: 'en_US-lessac-medium', pitch: 0.9, rate: 1.1, expression: 0.8 };
       const samples = await options.audio.renderVoiceOffline(testWav(), voice);
       let peak = 0;
       let sum = 0;
@@ -216,7 +216,7 @@ export function installDebugHooks(options: {
         peak = Math.max(peak, Math.abs(v));
         sum += v * v;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), hasNaN };
+      return { peak, rms: Math.sqrt(sum / samples.length), flatness: spectrum(samples).flatness, hasNaN };
     },
     setTension: (level) => options.audio.setTension(level),
     audioLevels: () => options.audio.levels(),
