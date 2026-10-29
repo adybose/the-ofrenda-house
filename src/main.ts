@@ -22,6 +22,7 @@ import { Arrival } from './story/arrival';
 import { Encounters } from './story/encounters';
 import { EXIT_KEY } from './story/accusation';
 import { Finale } from './story/finale';
+import { Dawn } from './story/dawn';
 import { Monologue } from './story/thoughts';
 import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
@@ -154,11 +155,14 @@ async function startGame(): Promise<void> {
   // The dark: faint ambient light and black fog; outside, blue-black fog the mansion can be seen
   // through. `?debug=fullbright` lights everything for screenshots.
   const indoorFog = new FogExp2(LIGHTING.fog.color, LIGHTING.fog.density);
+  // Kept so dawn can bring up the grey morning light (spec 22).
+  let ambient: AmbientLight | undefined = undefined;
   if (debug.has('fullbright')) {
     scene.add(new AmbientLight(0xffffff, 1.6));
     scene.add(new HemisphereLight(0xfff2dd, 0x40342a, 1.2));
   } else {
-    scene.add(new AmbientLight(LIGHTING.ambient.color, LIGHTING.ambient.intensity));
+    ambient = new AmbientLight(LIGHTING.ambient.color, LIGHTING.ambient.intensity);
+    scene.add(ambient);
     scene.fog = outside ? new FogExp2(0x0b0e16, 0.012) : indoorFog;
   }
   let exterior = layout ? createExteriorScene(scene, textures, layout, seed) : undefined;
@@ -239,6 +243,7 @@ async function startGame(): Promise<void> {
   let caught = false;
   let finale: Finale | undefined = undefined;
   let story: StoryFlow | undefined = undefined;
+  let dawn: Dawn | undefined = undefined;
   let storyHolds = false;
   const syncControls = () =>
     player.setControlsEnabled(!caught && !storyHolds && !finale?.isActive() && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
@@ -329,7 +334,7 @@ async function startGame(): Promise<void> {
     player,
     scene,
     caption: createCaption(),
-    suppressed: () => caught || story!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+    suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
   events.on('caughtByShadow', () => {
@@ -390,6 +395,28 @@ async function startGame(): Promise<void> {
       line: createCaption({ id: 'patriarch-line', colour: '#efe4c8', bottom: '40%' }),
     },
   });
+  // Dawn (spec 22): the patriarch's last question at six.
+  dawn = new Dawn({
+    seed,
+    caseFile,
+    house,
+    scene,
+    textures,
+    player,
+    dialogue,
+    audio,
+    monologue,
+    ambient,
+    applyDiff,
+    named: () => encounters!.named(),
+    toldTheTruth: () => encounters!.trust.toldTheTruth,
+    holdControls: (held) => {
+      storyHolds = held;
+      syncControls();
+    },
+  });
+  if (debug.size > 0) window.__dawn = { stage: () => dawn!.stage, petals: () => dawn!.petals() };
+
   if (walkSeconds > 0) {
     // The fps walk: no story.
   } else if (atMidnight) {
@@ -452,11 +479,13 @@ async function startGame(): Promise<void> {
       encounters.update(dt, time / 1000);
       story!.update(dt, time / 1000);
       shadow.update(dt, time / 1000);
-      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !story!.isActive() && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
+      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !story!.isActive() && !dawn!.over() && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
       finale!.update(dt, time / 1000);
-      const heldOff = caught || ended || story!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
+      const heldOff = caught || ended || story!.isActive() || dawn!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
+      dawn!.update(dt, time / 1000, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
       monologue.update(dt, heldOff);
-      scares!.update(dt, heldOff);
+      // After dawn the scares are over too (spec 22).
+      scares!.update(dt, heldOff || dawn!.over());
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);

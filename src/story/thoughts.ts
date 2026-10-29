@@ -124,6 +124,11 @@ export class Monologue {
     });
   }
 
+  /** Set free at dawn: the way back to the front door (spec 22). */
+  dawnFree(): void {
+    this.fire('dawnFree');
+  }
+
   /** A spirit set at peace: its candle has lit by itself. */
   solved(): void {
     this.fire('solved');
