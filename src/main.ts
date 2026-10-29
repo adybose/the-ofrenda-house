@@ -19,6 +19,10 @@ import { Interactions } from './player/interaction';
 import { createPlayerState } from './player/movement';
 import { createExteriorScene } from './render/exterior-mesh';
 import { Arrival } from './story/arrival';
+import { speakerFor } from './audio/voice';
+import { createDialogue } from './ui/dialogue-box';
+import { createHud } from './ui/hud';
+import { createJournal, type Journal } from './ui/journal';
 import { createPrompt } from './ui/prompt';
 import { createCollisionMap } from './world/collision';
 import { composeCollision, exteriorCollision, exteriorLayout } from './world/exterior';
@@ -195,6 +199,15 @@ async function startGame(): Promise<void> {
   audio.setOutdoors(outside);
   let windowCheck = 0;
 
+  // Conversations, the journal and the HUD (spec 10). Dialogue or the journal stops the player
+  // moving; the journal also pauses the world while it is open.
+  const hud = createHud({ prompt });
+  events.on('batteryChanged', ({ level }) => hud.set('battery', level));
+  let journal: Journal | undefined = undefined;
+  const syncControls = () => player.setControlsEnabled(!dialogue.isOpen() && !journal?.isOpen());
+  const dialogue = createDialogue({ speaker: speakerFor(audio), onOpenChange: syncControls, inputBlocked: () => journal?.isOpen() ?? false });
+  journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
+
   arrival = new Arrival({
     house,
     doors,
@@ -237,18 +250,22 @@ async function startGame(): Promise<void> {
     timer.update(time);
     const dtMs = timer.getDelta() * 1000;
     const dt = dtMs / 1000;
+    // The world stands still while the journal is open; the frame is still drawn behind it.
+    const paused = journal?.isOpen() ?? false;
     // The scripted fps walk drives the camera itself.
     if (walk) walk.frame(dtMs, lastDrawCalls);
-    else {
+    else if (!paused) {
       player.update(dt);
       arrival?.update(dt, player.state().x, player.state().z);
     }
     exterior?.update(time / 1000, camera.position, flash);
     view.update();
-    doors.update(dt);
-    flashlight.update(dt, camera);
-    lightning.update(dt);
-    candles.update(dt, camera.position, view.candles());
+    if (!paused) {
+      doors.update(dt);
+      lightning.update(dt);
+      candles.update(dt, camera.position, view.candles());
+    }
+    flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
     audio.setListener(camera.position.toArray(), forward.toArray());
     if (!exterior && (windowCheck -= dt) <= 0) {
@@ -285,6 +302,7 @@ async function startGame(): Promise<void> {
   if (debug.has('portraits')) (await import('./debug/portraits')).showPortraitSheet(seed);
   if (debug.has('soundboard')) (await import('./debug/soundboard')).showSoundboard(audio);
   if (debug.has('voices')) (await import('./debug/voices')).showVoicePanel(audio, seed, caseFile);
+  if (debug.has('dialogue')) (await import('./debug/dialogue')).installDialogueDebug({ dialogue, journal, caseFile, seed, demo: url.searchParams.get('demo') !== '0' });
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
