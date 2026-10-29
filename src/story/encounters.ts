@@ -16,7 +16,8 @@ import type { Journal } from '../ui/journal';
 import { SLOT_CELLS, cellId, parseCell, slotOfCell } from '../world/grid';
 import type { House } from '../world/house';
 import type { CellId, Room } from '../world/types';
-import { cellCentre } from '../world/units';
+import { CELL_SIZE, WALL_INSET, cellCentre } from '../world/units';
+import { DIR_STEP } from '../world/grid';
 import { encounterReducer, encounterSetup, startEncounter, type EncounterEmit, type EncounterEvent, type EncounterState } from './encounter';
 
 declare module '../core/events' {
@@ -34,13 +35,17 @@ declare module '../core/events' {
 
 /** Seconds to fade a spirit in, and out. */
 const FADE_IN = 1.2;
-const FADE_OUT = 1.6;
+const FADE_OUT = 2.0;
+/** Seconds to drift in through the wall behind the portrait (spec 19). */
+const DRIFT_IN = 2.2;
+/** How far beyond a wall the spirit starts, or ends up when it leaves. */
+const BEYOND_WALL = 0.75;
 /** Seconds to turn the camera to face the spirit. */
 const TURN = 0.8;
 /** Key rooms this many rooms away or nearer have their lines (and speech) prepared ahead. */
 const PREFETCH_ROOMS = 2;
-/** The spirit appears this far in front of the player, towards the middle of its room. */
-const APPEAR_DISTANCE = 2.8;
+/** The spirit stops this far in front of the player, towards its portrait (or the middle of its room). */
+const APPEAR_DISTANCE = 2.2;
 /** The torch beam lights a spirit within this angle (radians) of the view and this distance. */
 const BEAM = { angle: 0.32, distance: 9 };
 
@@ -86,6 +91,8 @@ export class Encounters {
   private trustState: TrustState = initialTrust();
   private active: Active | undefined;
   private leaving: { spirit: Spirit; gone(): void }[] = [];
+  /** Where the current spirit came through the wall from, and where it stopped (debug). */
+  private entering: { from: Vector3; to: Vector3; wall?: { point: Vector3; inward: Vector3 } } | undefined;
   private readonly forward = new Vector3();
 
   constructor(options: EncountersOptions) {
@@ -105,6 +112,16 @@ export class Encounters {
   /** The current encounter's step, for tests. */
   step(): string | undefined {
     return this.active?.state.step;
+  }
+
+  /** Where the current spirit drifted in from and to, for tests. */
+  entrance(): { from: Vector3; to: Vector3; wall?: { point: Vector3; inward: Vector3 } } | undefined {
+    return this.active ? this.entering : undefined;
+  }
+
+  /** A spirit on its way out through a wall, if any (for tests). */
+  leavingSpirit(): Spirit | undefined {
+    return this.leaving[this.leaving.length - 1]?.spirit;
   }
 
   /** The spirit on screen, if any (for tests). */
@@ -166,16 +183,33 @@ export class Encounters {
   private async run(room: Room): Promise<void> {
     const { caseFile, seed, house, scene, player, dialogue, audio, journal } = this.options;
     const character = caseFile.characters.find((c) => c.id === room.characterId)!;
-    // It appears a little way in from the doorway, between the player and the middle of the room.
-    const [sx, sy] = slotOfCell(...parseCell(room.cells[0]!));
-    const [cx, cz] = cellCentre(cellId(sx * SLOT_CELLS + 2, sy * SLOT_CELLS + 2));
+    // It comes out through the wall behind its portrait (spec 19) and drifts towards the player,
+    // stopping a little way in front of them; without a portrait, from beyond the room's middle.
     const here = player.state();
-    const toCentre = Math.hypot(cx - here.x, cz - here.z) || 1;
-    const reach = Math.min(APPEAR_DISTANCE, toCentre);
-    const [x, z] = [here.x + ((cx - here.x) / toCentre) * reach, here.z + ((cz - here.z) / toCentre) * reach];
+    const portrait = room.anchors.find((a) => a.kind === 'portrait' && a.side);
+    let toward: [number, number];
+    let from: Vector3;
+    let wall: { point: Vector3; inward: Vector3 } | undefined;
+    if (portrait) {
+      const [px, pz] = cellCentre(portrait.cell);
+      const [dx, dy] = DIR_STEP[portrait.side!];
+      const face = CELL_SIZE / 2 - WALL_INSET;
+      toward = [px + dx * face, pz - dy * face];
+      from = new Vector3(px + dx * (face + BEYOND_WALL), 0, pz - dy * (face + BEYOND_WALL));
+      wall = { point: new Vector3(toward[0], 0, toward[1]), inward: new Vector3(-dx, 0, dy) };
+    } else {
+      const [sx, sy] = slotOfCell(...parseCell(room.cells[0]!));
+      toward = cellCentre(cellId(sx * SLOT_CELLS + 2, sy * SLOT_CELLS + 2));
+      from = new Vector3(toward[0], 0, toward[1]);
+    }
+    const away = Math.hypot(toward[0] - here.x, toward[1] - here.z) || 1;
+    const reach = Math.max(0.6, Math.min(APPEAR_DISTANCE, away - 0.8));
+    const [x, z] = [here.x + ((toward[0] - here.x) / away) * reach, here.z + ((toward[1] - here.z) / away) * reach];
+    if (!portrait) from.add(new Vector3(x - here.x, 0, z - here.z).normalize().multiplyScalar(1.5));
 
     const spirit = createSpirit(character, createRng(seed).fork(STREAMS.render).fork(`spirit:${character.id}`));
-    spirit.position.set(x, 0, z);
+    const arrived = spirit.drift(from, new Vector3(x, 0, z), DRIFT_IN);
+    this.entering = { from: from.clone(), to: new Vector3(x, 0, z), wall };
     scene.add(spirit);
     spirit.rotation.y = Math.atan2(here.x - x, here.z - z);
     const facing = Math.atan2(-(x - here.x), -(z - here.z));
@@ -190,13 +224,16 @@ export class Encounters {
     this.options.onActiveChange(true);
     events.emit('encounterActive', { active: true });
     this.emitAll(this.active.state.emits);
-    audio.play('whisper', { position: [x, 1.6, z] });
+    audio.play('whisper', { position: [from.x, 1.6, from.z] });
 
     const voice = this.voices[character.id];
     const say = (line: string) => dialogue.say({ speaker: character.name, line, voice });
     const ask = (step: LineQuery['step'], extra: Partial<LineQuery> = {}) => fetchLine(seed, caseFile, { characterId: character.id, step, trust: this.state().trust, ...extra });
 
-    await say((await ask('greeting')).line);
+    // The greeting waits until it has come through the wall; its line is fetched meanwhile.
+    const greeting = ask('greeting');
+    await arrived;
+    await say((await greeting).line);
     this.dispatch({ type: 'greeted' });
 
     const question = await ask('whoAreYou');
@@ -226,9 +263,11 @@ export class Encounters {
     this.dispatch({ type: 'ended' });
     dialogue.close();
 
-    // It fades, at peace or in silence. Once it has gone its keys lie by its candle, whichever it
-    // was, so a locked room never becomes unreachable (spec 18), and a solved spirit's candle lights.
+    // It leaves through the nearest wall, fading, at peace or in silence (spec 19). Once it has gone
+    // its keys lie by its candle, whichever it was, so a locked room never becomes unreachable
+    // (spec 18), and a solved spirit's candle lights.
     const keyIds = this.state().keyIds;
+    void spirit.drift(spirit.position.clone(), throughNearestWall(room, spirit.position), FADE_OUT);
     this.leaving.push({
       spirit,
       gone: () => {
@@ -279,4 +318,22 @@ export class Encounters {
       }
     }
   }
+}
+
+/** A point just beyond the room's wall nearest to `at`, straight out from it. */
+function throughNearestWall(room: Room, at: Vector3): Vector3 {
+  const xs = room.cells.map((c) => parseCell(c)[0]);
+  const ys = room.cells.map((c) => parseCell(c)[1]);
+  // The room's wall faces in world metres (north is -z).
+  const west = Math.min(...xs) * CELL_SIZE + WALL_INSET;
+  const east = (Math.max(...xs) + 1) * CELL_SIZE - WALL_INSET;
+  const north = -(Math.max(...ys) + 1) * CELL_SIZE + WALL_INSET;
+  const south = -Math.min(...ys) * CELL_SIZE - WALL_INSET;
+  const exits = [
+    { d: at.x - west, to: new Vector3(west - BEYOND_WALL, 0, at.z) },
+    { d: east - at.x, to: new Vector3(east + BEYOND_WALL, 0, at.z) },
+    { d: at.z - north, to: new Vector3(at.x, 0, north - BEYOND_WALL) },
+    { d: south - at.z, to: new Vector3(at.x, 0, south + BEYOND_WALL) },
+  ];
+  return exits.reduce((best, e) => (e.d < best.d ? e : best)).to;
 }

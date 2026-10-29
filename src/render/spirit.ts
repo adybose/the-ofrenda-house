@@ -1,4 +1,20 @@
-import { BufferGeometry, Color, CylinderGeometry, Group, IcosahedronGeometry, LatheGeometry, Mesh, ShaderMaterial, Vector2, type Object3D } from 'three';
+import {
+  AdditiveBlending,
+  BufferGeometry,
+  Color,
+  CylinderGeometry,
+  DataTexture,
+  Group,
+  IcosahedronGeometry,
+  LatheGeometry,
+  Mesh,
+  ShaderMaterial,
+  Sprite,
+  SpriteMaterial,
+  Vector2,
+  Vector3,
+  type Object3D,
+} from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Character, Role } from '../case/types';
 import type { Rng } from '../core/rng';
@@ -6,7 +22,8 @@ import type { Rng } from '../core/rng';
 // A spirit (spec 11): a low-poly figure shaped by its character (age by role, a skirt or a coat by
 // gender), tinted by role, drawn with a translucent shader. Animated 3D noise drifts through it, a
 // rim glows at its edges, it flickers, floats and fades. It lights itself: it glows in the dark.
-// The killer looks exactly like the others.
+// The killer looks exactly like the others. A soft halo around it shows it faintly even in total
+// darkness, and it can drift through walls (spec 19).
 
 /** A pale tint per role, so spirits are told apart at a glance. */
 const TINT: Record<Role, string> = {
@@ -85,13 +102,47 @@ void main() {
 }
 `;
 
+/** A soft round glow, built from bytes (no canvas), shared by every halo. */
+const HALO_TEXTURE = (() => {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot((x + 0.5) / size - 0.5, (y + 0.5) / size - 0.5) * 2;
+      const a = Math.max(0, 1 - d) ** 2.2;
+      data.set([255, 255, 255, Math.round(a * 255)], (y * size + x) * 4);
+    }
+  }
+  const texture = new DataTexture(data, size, size);
+  texture.needsUpdate = true;
+  return texture;
+})();
+
+/** How strong the halo is at full fade. */
+const HALO_OPACITY = 0.45;
+/** It floats this high above the floor, give or take the bob. */
+const FLOAT = 0.32;
+const BOB = 0.06;
+
+interface Drift {
+  from: Vector3;
+  to: Vector3;
+  seconds: number;
+  start?: number;
+  resolve(): void;
+}
+
 /** A spirit: an Object3D with its fade, its brightness in the torch beam and its animation. */
 export class Spirit extends Group {
   private readonly material: ShaderMaterial;
   private readonly phase: number;
   private readonly flickerRate: number;
+  private readonly halo: Sprite;
   private fadeLevel = 0;
   private litLevel = 0;
+  private haloLevel = 1;
+  private drifting: Drift | undefined;
+  private driftProgress = 1;
 
   constructor(body: BufferGeometry, tint: Color, phase: number, flickerRate: number) {
     super();
@@ -112,7 +163,30 @@ export class Spirit extends Group {
     });
     const mesh = new Mesh(body, this.material);
     mesh.renderOrder = 10;
+    this.halo = new Sprite(new SpriteMaterial({ map: HALO_TEXTURE, color: tint, blending: AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 }));
+    this.halo.scale.set(1.4, 2.4, 1);
+    this.halo.position.y = 0.95;
+    this.halo.renderOrder = 11;
+    mesh.add(this.halo);
     this.add(mesh);
+  }
+
+  /** 0..1: the glow around it (spec 19). */
+  setHalo(level: number): void {
+    this.haloLevel = Math.max(0, Math.min(1, level));
+  }
+
+  /** Glides from `from` to `to` (through a wall, if one is in the way), resolving on arrival. */
+  drift(from: Vector3, to: Vector3, seconds: number): Promise<void> {
+    this.drifting?.resolve();
+    this.position.copy(from);
+    this.driftProgress = 0;
+    return new Promise((resolve) => (this.drifting = { from: from.clone(), to: to.clone(), seconds, resolve }));
+  }
+
+  /** How far along the current drift it is, 0..1 (1 when still). */
+  get drift01(): number {
+    return this.driftProgress;
   }
 
   /** 0 is gone, 1 fully there. */
@@ -142,14 +216,29 @@ export class Spirit extends Group {
     u.lit!.value = this.litLevel;
     // Flicker: two unrelated waves, with a rare deeper dip.
     const wave = Math.sin(t * this.flickerRate) * Math.sin(t * this.flickerRate * 2.7 + 1.3);
-    u.flicker!.value = 0.85 + 0.15 * wave - (Math.sin(t * 0.7) > 0.97 ? 0.35 : 0);
-    this.children[0]!.position.y = 0.25 + Math.sin(t * 0.9) * 0.05;
+    const flicker = 0.85 + 0.15 * wave - (Math.sin(t * 0.7) > 0.97 ? 0.35 : 0);
+    u.flicker!.value = flicker;
+    this.children[0]!.position.y = FLOAT + Math.sin(t * 0.9) * BOB;
+    this.halo.material.opacity = HALO_OPACITY * this.haloLevel * this.fadeLevel * flicker;
+
+    const drift = this.drifting;
+    if (drift) {
+      drift.start ??= time;
+      const k = Math.min(1, (time - drift.start) / drift.seconds);
+      this.driftProgress = k;
+      this.position.lerpVectors(drift.from, drift.to, k * k * (3 - 2 * k));
+      if (k >= 1) {
+        this.drifting = undefined;
+        drift.resolve();
+      }
+    }
   }
 
   dispose(): void {
     const mesh = this.children[0] as Mesh;
     mesh.geometry.dispose();
     this.material.dispose();
+    this.halo.material.dispose();
   }
 }
 
