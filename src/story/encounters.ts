@@ -309,9 +309,10 @@ export class Encounters {
     this.leaving.push({
       spirit,
       gone: () => {
+        // The candle lights first, then the keys are seen lying beside it.
+        this.options.onSpiritLeft?.({ characterId: character.id, outcome: outcome === 'reward' ? 'reward' : 'silence', keyIds });
         for (const keyId of keyIds) events.emit('keyAwarded', { keyId });
         if (keyIds.includes(EXIT_KEY)) events.emit('exitKeyAwarded', {});
-        this.options.onSpiritLeft?.({ characterId: character.id, outcome: outcome === 'reward' ? 'reward' : 'silence', keyIds });
       },
     });
     this.resolved.add(character.id);

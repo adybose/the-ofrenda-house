@@ -6,7 +6,8 @@ import { assignVoices } from '../dialogue/voices';
 import type { PlayerController } from '../player/controller';
 import { createSpirit, type Spirit } from '../render/spirit';
 import type { Dialogue } from '../ui/dialogue-box';
-import { showEnding, type EndingKind } from '../ui/ending';
+import { showEnding } from '../ui/ending';
+import { resolveEnding, type EndingKind } from './flow';
 import { DIR_STEP } from '../world/grid';
 import type { House } from '../world/house';
 import { freeWallSpots } from '../world/stands';
@@ -22,7 +23,7 @@ declare module '../core/events' {
 }
 
 /** The patriarch's last words, by ending (fixed text, from the story). */
-const LINES: Record<EndingKind, string> = {
+const LINES: Partial<Record<EndingKind, string>> = {
   true: 'You named the one who did this. Now we can rest. Go home, child. Light a candle for us.',
   escape: 'You named the one who did this. The garden door is open. Go.',
 };
@@ -102,9 +103,9 @@ export class Finale {
     player.teleport(here.x, here.z, Math.atan2(-(x - here.x), -(z - here.z)));
 
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const kind: EndingKind = this.options.toldTheTruth() ? 'true' : 'escape';
+    const kind = resolveEnding({ named: true, toldTheTruth: this.options.toldTheTruth(), caught: false, dawnWrong: false });
     const voice = assignVoices(seed, caseFile.characters)[character.id];
-    await dialogue.say({ speaker: character.name, line: LINES[kind], voice });
+    await dialogue.say({ speaker: character.name, line: LINES[kind]!, voice });
     dialogue.close();
     events.emit('ending', { kind });
     showEnding(kind);

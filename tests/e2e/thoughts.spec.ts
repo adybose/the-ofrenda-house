@@ -55,5 +55,5 @@ test('no thought shows while a spirit speaks; afterwards, the candle that lit it
     return log.slice(start, end).filter((e) => e.name === 'thoughtShown').map((e) => e.id);
   });
   expect(shownDuring).toEqual([]);
-  await expect(thought(page)).toHaveText("Its candle lit by itself. La Sombra won't come in while it burns.", { timeout: 10_000 });
+  await expect(thought(page)).toHaveText("Its candle lit by itself. La Sombra won't come in while it burns.", { timeout: 15_000 });
 });

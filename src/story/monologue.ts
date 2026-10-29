@@ -134,7 +134,8 @@ export function monologueReducer(state: MonologueState, event: MonologueEvent): 
     }
     case 'tick': {
       const { ctx, now, blocked } = event;
-      let next = fire(base, 'tick', ctx, now, {});
+      // Conditions are only looked at while nothing else holds the screen.
+      let next = blocked ? base : fire(base, 'tick', ctx, now, {});
       // Follow-ups that are due: a nudge, unless the player has already done it.
       const due = next.followUps.filter((f) => f.at <= now);
       if (due.length) {

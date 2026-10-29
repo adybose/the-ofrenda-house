@@ -29,7 +29,9 @@ import { Hazards } from './spirits/hazards';
 import { Scares } from './scares/scares';
 import { ShadowController } from './spirits/shadow-controller';
 import { createCaption } from './ui/caption';
-import { showCaught } from './ui/caught';
+import { StoryFlow } from './story/act1';
+import { clockStart } from './story/flow';
+import { showEnding, type EndingKind } from './ui/ending';
 import { candleSummary } from './items/items';
 import { speakerFor } from './audio/voice';
 import { createDialogue } from './ui/dialogue-box';
@@ -105,17 +107,19 @@ async function startGame(): Promise<void> {
     scares?.sync(diff);
   };
 
-  // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall,
-  // `?skip=act1` at the end of the Act 1 corridor with the way into the house unsealed (spec 14
-  // will own both); the fps walk drives the camera inside, so it skips the arrival too.
+  // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall with
+  // Act 1 to play; `?skip=act1` at midnight at the end of the Act 1 corridor, with the way into the
+  // house unsealed; `?skip=exit` the same, holding every clue and the key to the way out (spec 14).
+  // The fps walk drives the camera inside, so it skips the arrival and the story.
   const skip = url.searchParams.get('skip');
+  const atMidnight = skip === 'act1' || skip === 'exit';
   const walkSeconds = Number(url.searchParams.get('walk') ?? 0);
-  const outside = skip !== 'prologue' && skip !== 'act1' && walkSeconds === 0;
-  if (skip === 'act1') house.endAct1();
+  const outside = skip !== 'prologue' && !atMidnight && walkSeconds === 0;
+  if (atMidnight) house.endAct1();
   const layout = outside ? exteriorLayout(seed) : undefined;
-  const startCell = skip === 'act1' ? '1,2' : house.startCell;
+  const startCell = atMidnight ? '1,2' : house.startCell;
   const [cellX, cellZ] = cellCentre(startCell);
-  const start = layout?.start ?? { x: cellX, z: cellZ, yaw: skip === 'act1' ? Math.PI / 2 : 0 };
+  const start = layout?.start ?? { x: cellX, z: cellZ, yaw: atMidnight ? Math.PI / 2 : 0 };
   // Outside, only the entrance wing is built (seen through the doorway); the rest of the house
   // waits until the door has slammed, so nothing inside can show past the mansion's outer walls.
   if (outside) applyDiff({ loaded: [house.chunkAt(0, 0)], unloaded: [] });
@@ -234,7 +238,10 @@ async function startGame(): Promise<void> {
   let encounters: Encounters | undefined = undefined;
   let caught = false;
   let finale: Finale | undefined = undefined;
-  const syncControls = () => player.setControlsEnabled(!caught && !finale?.isActive() && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
+  let story: StoryFlow | undefined = undefined;
+  let storyHolds = false;
+  const syncControls = () =>
+    player.setControlsEnabled(!caught && !storyHolds && !finale?.isActive() && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
   const dialogue = createDialogue({ speaker: speakerFor(audio), onOpenChange: syncControls, inputBlocked: () => journal?.isOpen() ?? false });
   journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
 
@@ -257,13 +264,11 @@ async function startGame(): Promise<void> {
       items.layKeys(characterId, keyIds);
       if (outcome === 'reward') monologue.solved();
     },
-    allClues: url.searchParams.get('clues') === 'all',
+    allClues: url.searchParams.get('clues') === 'all' || skip === 'exit',
   });
 
-  // The stranger's thoughts (spec 20). Until spec 14 scripts Act 1, `?skip=act1` starts where the
-  // patriarch leaves the player, with the first thought.
+  // The stranger's thoughts (spec 20); the story thinks the first one at midnight.
   const monologue = new Monologue({ caseFile, house, items, flashlight, player, thoughts: createThoughts() });
-  if (skip === 'act1') monologue.think('findCandle');
   let ended = false;
   events.on('ending', () => (ended = true));
 
@@ -324,15 +329,14 @@ async function startGame(): Promise<void> {
     player,
     scene,
     caption: createCaption(),
-    suppressed: () => caught || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+    suppressed: () => caught || story!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
-  if (skip === 'act1' && url.searchParams.get('shadow') !== '0') shadow.enable();
   events.on('caughtByShadow', () => {
     caught = true;
     syncControls();
-    // Spec 14's possessed ending will take over from this placeholder.
-    showCaught();
+    showEnding('possessed');
+    events.emit('ending', { kind: 'possessed' });
   });
   events.on('playerCellChanged', ({ cell }) => {
     if (!arrival || arrival.stage === 'inside') encounters!.enterCell(cell);
@@ -353,8 +357,53 @@ async function startGame(): Promise<void> {
       if (!debug.has('fullbright')) scene.fog = indoorFog;
       audio.setOutdoors(false);
       applyDiff(house.update(worldToCell(camera.position.x, camera.position.z)));
+      story?.inside();
     },
   });
+
+  // The story (spec 14): the title, the prologue's captions, the scripted Act 1, and the clock.
+  story = new StoryFlow({
+    seed,
+    caseFile,
+    house,
+    scene,
+    textures,
+    player,
+    dialogue,
+    speaker: speakerFor(audio),
+    audio,
+    lightning,
+    scares: scares!,
+    monologue,
+    hud,
+    applyDiff,
+    wakeShadow: () => {
+      if (url.searchParams.get('shadow') !== '0') shadow.enable();
+    },
+    holdControls: (held) => {
+      storyHolds = held;
+      syncControls();
+    },
+    captions: {
+      story: createCaption({ id: 'story-caption', colour: '#efe4c8', bottom: '55%' }),
+      hint: createCaption({ id: 'hint', colour: '#d9b46c', bottom: '14%' }),
+      line: createCaption({ id: 'patriarch-line', colour: '#efe4c8', bottom: '40%' }),
+    },
+  });
+  if (walkSeconds > 0) {
+    // The fps walk: no story.
+  } else if (atMidnight) {
+    const clock = url.searchParams.get('clock');
+    story.startAct2(clock ? clockStart(clock) : 0);
+    // Every clue held and the key to the way out in hand: the dining room is waiting.
+    if (skip === 'exit') events.emit('keyPickedUp', { keyId: EXIT_KEY });
+  } else if (skip === 'prologue') {
+    story.inside();
+  } else if (debug.size === 0 || url.searchParams.get('title') === '1') {
+    story.title();
+  } else {
+    story.prologue();
+  }
   const forward = new Vector3();
 
   const fpsTools = debug.has('fps') ? await import('./debug/fps') : undefined;
@@ -401,10 +450,11 @@ async function startGame(): Promise<void> {
         showCarried();
       }
       encounters.update(dt, time / 1000);
+      story!.update(dt, time / 1000);
       shadow.update(dt, time / 1000);
-      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
+      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !story!.isActive() && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
       finale!.update(dt, time / 1000);
-      const heldOff = caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
+      const heldOff = caught || ended || story!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
       monologue.update(dt, heldOff);
       scares!.update(dt, heldOff);
     }
@@ -451,6 +501,14 @@ async function startGame(): Promise<void> {
   if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
   if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
   if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, player, fire: url.searchParams.get('fire') });
+
+  if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel() };
+  // `&ending=true|escape|possessed|trapped`: straight to an ending screen.
+  const ending = url.searchParams.get('ending');
+  if (ending === 'true' || ending === 'escape' || ending === 'possessed' || ending === 'trapped') {
+    showEnding(ending as EndingKind);
+    events.emit('ending', { kind: ending as EndingKind });
+  }
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });

@@ -63,7 +63,6 @@ export class ShadowController {
   /** The path ignoring sanctuaries: to tell whether it can see the player through a door. */
   private sightPath: CellId[] = [];
   private repath = 0;
-  private hourClock = 0;
   private enabled = false;
   private speaking = false;
 
@@ -72,6 +71,8 @@ export class ShadowController {
     this.rng = createRng(options.seed).fork(STREAMS.shadow).fork('controller');
     options.scene.add(this.figure);
     events.on('riddleFailed', () => this.dispatch({ type: 'riddleFailed' }));
+    // Each hour the clock strikes (spec 14), it grows bolder.
+    events.on('hourStruck', () => this.dispatch({ type: 'hourPassed' }));
     events.on('accused', ({ correct }) => {
       if (!correct) this.dispatch({ type: 'wrongName' });
     });
@@ -139,10 +140,6 @@ export class ShadowController {
     const p = player.state();
     const playerCell = worldToCell(p.x, p.z);
     const hushed = suppressed();
-    if (!hushed && (this.hourClock += dt) >= SHADOW.hourSeconds) {
-      this.hourClock -= SHADOW.hourSeconds;
-      this.dispatch({ type: 'hourPassed' });
-    }
 
     const present = PRESENT.has(this.state.mode);
     if (present) this.move(dt, p.x, p.z, playerCell);
