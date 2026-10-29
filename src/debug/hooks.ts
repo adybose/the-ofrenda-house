@@ -42,8 +42,8 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness`: how noisy rather than tonal it is (see `flatness`); `envelope`: RMS per 50 ms. */
-  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; envelope: number[]; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
+  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness` and `centroid`: how noisy rather than tonal, and how bright (see `spectrum`); `envelope`: RMS per 50 ms. */
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; centroid: number; envelope: number[]; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
@@ -196,7 +196,7 @@ export function installDebugHooks(options: {
         lowSum += low[channel]! ** 2;
         if (Math.abs(v) > 0.005) last = i;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), flatness: flatness(samples), envelope: envelope.map((e) => Math.sqrt(e / FRAME)), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
+      return { peak, rms: Math.sqrt(sum / samples.length), ...spectrum(samples), envelope: envelope.map((e) => Math.sqrt(e / FRAME)), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
     },
     audioState: () => options.audio.state,
     ambienceGain: () => options.audio.levels().ambience,
@@ -223,11 +223,11 @@ export function installDebugHooks(options: {
 }
 
 /**
- * Spectral flatness (0 = pure tones, 1 = flat noise) from 300 Hz to 6 kHz, the median over the
- * loudest frames of the left channel of interleaved stereo at 44.1 kHz: a whistle scores near 0, a
- * harsh, breathy cry higher.
+ * The spectrum from 300 Hz to 6 kHz, as medians over the loudest frames of the left channel of
+ * interleaved stereo at 44.1 kHz. `flatness`: 0 for pure tones, 1 for flat noise (a whistle scores near
+ * 0, a harsh, breathy cry higher). `centroid`: the spectrum's centre of mass in Hz, its brightness.
  */
-function flatness(samples: Float32Array): number {
+function spectrum(samples: Float32Array): { flatness: number; centroid: number } {
   const FRAME = 1024;
   const left = samples.filter((_, i) => i % 2 === 0);
   const frames: { start: number; energy: number }[] = [];
@@ -250,9 +250,11 @@ function flatness(samples: Float32Array): number {
       }
       power.push(re * re + im * im + 1e-20);
     }
+    const total = power.reduce((sum, p) => sum + p, 0);
     const geometric = Math.exp(power.reduce((sum, p) => sum + Math.log(p), 0) / power.length);
-    return geometric / (power.reduce((sum, p) => sum + p, 0) / power.length);
+    const centre = power.reduce((sum, p, i) => sum + p * (i + 7), 0) / total;
+    return { flatness: geometric / (total / power.length), centroid: (centre * 44_100) / FRAME };
   });
-  values.sort((a, b) => a - b);
-  return values[Math.floor(values.length / 2)] ?? 0;
+  const median = (list: number[]) => list.sort((a, b) => a - b)[Math.floor(list.length / 2)] ?? 0;
+  return { flatness: median(values.map((v) => v.flatness)), centroid: median(values.map((v) => v.centroid)) };
 }

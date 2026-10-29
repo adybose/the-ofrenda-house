@@ -96,11 +96,13 @@ test('overhead thunder fades gradually and long; the slam is a short, sharp wood
   // Half-second windows from 0.5 s to 6 s: none falls under 40% of the one before.
   const fall = thunder.windows.slice(1, 12);
   for (let i = 1; i < fall.length; i++) expect(fall[i]!, `window ${i + 1}`).toBeGreaterThan(fall[i - 1]! * 0.4);
-  // A wooden door, not a plucked string (rang on) or a bass drum (87% bass, 0.55 s): short, sharp, low-mid.
+  // A wooden door, not a plucked string (rang on) or a bass drum (87% bass, 0.55 s): short and sharp,
+  // and a little deeper than the first wooden version (57% bass).
   const slam = await page.evaluate(() => window.__ofrenda!.renderSound('slam'));
-  expect(slam.audibleFor).toBeLessThan(0.45);
+  expect(slam.audibleFor).toBeLessThan(0.2);
   expect(slam.envelope.indexOf(Math.max(...slam.envelope))).toBe(0);
-  expect(slam.lowRms).toBeLessThan(slam.rms * 0.6);
+  expect(slam.lowRms).toBeGreaterThan(slam.rms * 0.6);
+  expect(slam.lowRms).toBeLessThan(slam.rms * 0.85);
   expect(slam.peak).toBeGreaterThan(0.6);
 });
 
@@ -119,6 +121,8 @@ test('the cats sound like voices: the meow tapers away; the scream is a shrill m
   expect(meow.flatness).toBeGreaterThan(0.004);
   expect(meow.flatness).toBeLessThan(0.1);
   tapers(meow.envelope, meow.audibleFor);
+  // Shriller: brighter than the 1326 Hz centroid it had.
+  expect(meow.centroid).toBeGreaterThan(1326 * 1.15);
   const frames = meow.envelope.slice(0, Math.ceil(meow.audibleFor / 0.05));
   expect(Math.max(...frames.slice(Math.floor(frames.length * 0.75)))).toBeLessThan(Math.max(...frames) * 0.35);
 
@@ -129,6 +133,8 @@ test('the cats sound like voices: the meow tapers away; the scream is a shrill m
   const cry = scream.envelope.slice(0, Math.ceil(scream.audibleFor / 0.05));
   expect(cry.indexOf(Math.max(...cry))).toBeLessThan(cry.length / 3);
   tapers(scream.envelope, scream.audibleFor);
+  // Shriller: brighter than the 2415 Hz centroid it had.
+  expect(scream.centroid).toBeGreaterThan(2415 * 1.15);
 });
 
 test('carpet footsteps are soft but heard, and every whisper version plays', async ({ page }) => {

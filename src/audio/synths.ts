@@ -445,11 +445,11 @@ export function creak(input: SynthContext): number {
  */
 export function slam(input: SynthContext): number {
   const s = withLevel(saturate(input, 1.5, 0.85), SLAM_LEVEL);
-  click(s, s.t, woodBody(s, 200), 4);
+  click(s, s.t, woodBody(s, 100), 4);
   burst(s, s.t, 'white', 'bandpass', 2200, 0.35, 0.006, 0.6);
-  burst(s, s.t, 'pink', 'bandpass', 260, 0.7, 0.09, 1.2);
-  burst(s, s.t, 'pink', 'bandpass', 480, 0.45, 0.05, 1.5);
-  push(s, s.t, 0.1);
+  burst(s, s.t, 'pink', 'bandpass', 170, 0.7, 0.09, 1.2);
+  burst(s, s.t, 'pink', 'bandpass', 330, 0.45, 0.05, 1.5);
+  push(s, s.t, 0.35);
   latchClick(s, s.t + 0.008, 1, 0.12);
   for (let i = 0; i < 3; i++) burst(s, s.t + 0.03 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.03, 0.03, 3);
   return 0.4;
@@ -731,8 +731,8 @@ function meow(s: SynthContext, shape: MeowShape): number {
 const CAT_LEVEL = 0.14;
 
 /**
- * A cat's meow, "m-ia-ow" (after Schötz and colleagues' recordings): about 620 Hz rising to 850 and
- * falling to 560, opening from a closed-mouth "m", fullest as the jaw opens, then tapering away as it
+ * A cat's meow, "m-ia-ow" (after Schötz and colleagues' recordings), on the shrill side: about 780 Hz
+ * rising to 1060 and falling to 700, opening from a closed-mouth "m", fullest as the jaw opens, then tapering away as it
  * closes to "ow", the jaw's resonance softening with it.
  */
 export function cat(s: SynthContext): number {
@@ -740,25 +740,25 @@ export function cat(s: SynthContext): number {
   const pitch = 0.95 + s.rng.float() * 0.1;
   return meow(s, {
     length,
-    pitch: (x) => pitch * (x < 0.3 ? 620 + 230 * Math.sin((Math.PI / 2) * (x / 0.3)) : 850 - 290 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7))),
-    f1: [[0, 700], [0.07, 700], [0.4, 1600], [1, 800]],
+    pitch: (x) => pitch * (x < 0.3 ? 780 + 280 * Math.sin((Math.PI / 2) * (x / 0.3)) : 1060 - 360 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7))),
+    f1: [[0, 800], [0.07, 800], [0.4, 1800], [1, 900]],
     f1Boost: [14, 6],
     upper: [[3000, 6, 4], [5000, 4, 4]],
     lips: [[0, 500], [0.1, 7000], [0.6, 7000], [1, 2000]],
-    envelope: [[0.07, 0.3], [0.35, 1], [0.6, 0.55], [0.8, 0.25], [1, 0]],
+    envelope: [[0.07, 0.3], [0.4, 1], [0.6, 0.55], [0.8, 0.25], [1, 0]],
     level: CAT_LEVEL,
     jitter: 0.01,
     breath: 0.12,
-    brightness: 1.5,
+    brightness: 1.25,
   });
 }
 
-const CAT_SCREAM_LEVEL = 0.3;
+const CAT_SCREAM_LEVEL = 0.22;
 
 /**
  * A cat screaming as it bolts (spec 13's scares): a shrill, strained meow, the pain shriek of the Lund
  * recordings ("short intense cries of tense vowels, often [æ], [ɛ] or [i]", with "great strain at
- * mouth and throat"). It bursts out on an open [æ], climbs fast from about 750 to 1250 Hz, holds,
+ * mouth and throat"). It bursts out on an open [æ], climbs fast from about 950 to 1550 Hz, holds,
  * and falls away as the mouth closes. A bright, tense voice with a little jitter: no noise bursts,
  * no growl.
  */
@@ -767,16 +767,16 @@ export function catScream(s: SynthContext): number {
   const pitch = 0.95 + s.rng.float() * 0.1;
   return meow(s, {
     length,
-    pitch: (x) => pitch * (x < 0.25 ? 750 + 500 * Math.sin((Math.PI / 2) * (x / 0.25)) : x < 0.7 ? 1250 - 100 * ((x - 0.25) / 0.45) : 1150 - 450 * Math.sin((Math.PI / 2) * ((x - 0.7) / 0.3))),
+    pitch: (x) => pitch * (x < 0.25 ? 950 + 600 * Math.sin((Math.PI / 2) * (x / 0.25)) : x < 0.7 ? 1550 - 100 * ((x - 0.25) / 0.45) : 1450 - 600 * Math.sin((Math.PI / 2) * ((x - 0.7) / 0.3))),
     f1: [[0, 900], [0.2, 1800], [0.7, 1800], [1, 1000]],
-    f1Boost: [10, 6],
-    upper: [[3200, 9, 2], [5000, 6, 2.5]],
+    f1Boost: [7, 4],
+    upper: [[3600, 12, 2], [5000, 10, 2.5]],
     lips: [[0, 1500], [0.03, 8000], [0.7, 8000], [1, 3000]],
     envelope: [[0.03, 1], [0.65, 0.9], [0.85, 0.4], [1, 0]],
     level: CAT_SCREAM_LEVEL,
     jitter: 0.02,
     breath: 0.08,
-    brightness: 1.1,
+    brightness: 1,
   });
 }
 
