@@ -21,6 +21,10 @@ import { createExteriorScene } from './render/exterior-mesh';
 import { Arrival } from './story/arrival';
 import { Encounters } from './story/encounters';
 import { ItemsController } from './items/controller';
+import { Hazards } from './spirits/hazards';
+import { ShadowController } from './spirits/shadow-controller';
+import { createCaption } from './ui/caption';
+import { showCaught } from './ui/caught';
 import { candleSummary } from './items/items';
 import { speakerFor } from './audio/voice';
 import { createDialogue } from './ui/dialogue-box';
@@ -110,6 +114,7 @@ async function startGame(): Promise<void> {
   else applyDiff(house.update(startCell));
 
   const houseCollision = createCollisionMap(house, seed);
+  let hazards: Hazards | undefined = undefined;
   const grounds = layout ? exteriorCollision(layout) : undefined;
   let inGrounds = outside;
   const prompt = createPrompt();
@@ -117,7 +122,13 @@ async function startGame(): Promise<void> {
     camera,
     canvas: renderer.domElement,
     house,
-    collision: { boxesNear: (x, z, r) => (inGrounds && grounds ? composeCollision(houseCollision, grounds) : houseCollision).boxesNear(x, z, r) },
+    collision: {
+      boxesNear: (x, z, r) => {
+        const house = inGrounds && grounds ? composeCollision(houseCollision, grounds) : houseCollision;
+        // A chandelier or mirror La Sombra brought down blocks the way (spec 12).
+        return hazards ? [...house.boxesNear(x, z, r), ...hazards.boxesNear(x, z, r)] : house.boxesNear(x, z, r);
+      },
+    },
     interactions,
     prompt,
     start: createPlayerState(start.x, start.z, start.yaw),
@@ -213,7 +224,8 @@ async function startGame(): Promise<void> {
   events.on('batteryChanged', ({ level }) => hud.set('battery', level));
   let journal: Journal | undefined = undefined;
   let encounters: Encounters | undefined = undefined;
-  const syncControls = () => player.setControlsEnabled(!dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
+  let caught = false;
+  const syncControls = () => player.setControlsEnabled(!caught && !dialogue.isOpen() && !journal?.isOpen() && !encounters?.isActive());
   const dialogue = createDialogue({ speaker: speakerFor(audio), onOpenChange: syncControls, inputBlocked: () => journal?.isOpen() ?? false });
   journal = createJournal({ caseFile, seed, onOpenChange: syncControls });
 
@@ -255,6 +267,30 @@ async function startGame(): Promise<void> {
     if (event.repeat || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive()) return;
     if (event.code === 'KeyM') items.strikeMatch();
     if (event.code === 'KeyB') items.blowOut();
+  });
+
+  // La Sombra and its hazards (spec 12). It wakes when Act 2 begins: for now `?skip=act1`
+  // (spec 14 will wake it at the midnight chime); `&shadow=0` keeps it asleep.
+  const shadow = new ShadowController({
+    seed,
+    house,
+    items,
+    flashlight,
+    audio,
+    speaker: speakerFor(audio),
+    doors,
+    player,
+    scene,
+    caption: createCaption(),
+    suppressed: () => caught || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+  });
+  hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
+  if (skip === 'act1' && url.searchParams.get('shadow') !== '0') shadow.enable();
+  events.on('caughtByShadow', () => {
+    caught = true;
+    syncControls();
+    // Spec 14's possessed ending will take over from this placeholder.
+    showCaught();
   });
   events.on('playerCellChanged', ({ cell }) => {
     if (!arrival || arrival.stage === 'inside') encounters!.enterCell(cell);
@@ -323,6 +359,8 @@ async function startGame(): Promise<void> {
         showCarried();
       }
       encounters.update(dt, time / 1000);
+      shadow.update(dt, time / 1000);
+      hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
@@ -365,6 +403,7 @@ async function startGame(): Promise<void> {
   if (debug.has('encounter')) (await import('./debug/encounter')).installEncounterDebug({ encounters, house, camera, scene, caseFile });
   if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
   if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
+  if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });

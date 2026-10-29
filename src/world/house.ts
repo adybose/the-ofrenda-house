@@ -43,6 +43,8 @@ export interface House {
   unlock(doorId: DoorId): void;
   /** Opens or closes an ordinary door. Returns false for locked or sealed doors. */
   setDoorOpen(doorId: DoorId, open: boolean): boolean;
+  /** Spec 12: a door La Sombra slams jams shut (locked, with no key), then is released, closed. */
+  holdShut(doorId: DoorId, shut: boolean): boolean;
   pinCells(cells: readonly CellId[]): void;
   shiftCorridorBehind(): ChunkDiff;
   endAct1(): void;
@@ -131,6 +133,7 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
   ]);
   const removedEdges = new Set<string>();
   const pinned = new Set<CellId>();
+  const heldShut = new Set<DoorId>();
   let diningSlot: [number, number] | undefined;
   let reshuffles = 0;
   const keyRooms = lockPlan(root.fork('locks'), caseFile);
@@ -496,6 +499,19 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       const keyRoom = keyRooms.find((k) => k.doorId === doorId);
       if (keyRoom) keyRoom.locked = false;
       if (findDoor(doorId)?.state === 'locked') setDoorState(doorId, 'closed');
+    },
+
+    holdShut(doorId, shut) {
+      if (!shut) {
+        if (!heldShut.delete(doorId)) return false;
+        setDoorState(doorId, 'closed');
+        return true;
+      }
+      const state = findDoor(doorId)?.state;
+      if ((state !== 'open' && state !== 'closed') || keyRooms.some((k) => k.doorId === doorId)) return false;
+      heldShut.add(doorId);
+      setDoorState(doorId, 'locked');
+      return true;
     },
 
     setDoorOpen(doorId, open) {
