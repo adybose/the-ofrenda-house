@@ -69,6 +69,19 @@ export function createJournal(options: { caseFile: CaseFile; seed: Seed; onOpenC
   page.style.display = 'none';
   document.body.appendChild(page);
 
+  // The way in that shows on screen: a button that opens the journal too, with a dot for news.
+  const button = el('button', 'ofr-panel ofr-name', 'Journal (J)');
+  button.id = 'journal-button';
+  button.title = 'Your clues, the household and your keys';
+  const badge = el('span', 'badge');
+  badge.style.display = 'none';
+  button.appendChild(badge);
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setOpen(true);
+  });
+  document.body.appendChild(button);
+
   const toast = el('div', 'ofr-panel');
   toast.id = 'clue-toast';
   toast.style.display = 'none';
@@ -133,11 +146,13 @@ export function createJournal(options: { caseFile: CaseFile; seed: Seed; onOpenC
     open = value;
     if (value) {
       draw();
-      // The new clue is on the page now; its toast would only show through.
+      // The new clue is on the page now; its toast would only show through, and its dot is seen.
       hideToast();
+      badge.style.display = 'none';
       if (document.pointerLockElement) document.exitPointerLock();
     }
     page.style.display = value ? 'block' : 'none';
+    button.style.display = value ? 'none' : '';
     options.onOpenChange?.(value);
   };
 
@@ -155,7 +170,8 @@ export function createJournal(options: { caseFile: CaseFile; seed: Seed; onOpenC
         draw();
         return;
       }
-      toast.replaceChildren(el('div', 'label ofr-name', `A clue, from ${character(card.holderId).name}`), el('div', '', card.text));
+      badge.style.display = 'inline-block';
+      toast.replaceChildren(el('div', 'label ofr-name', `A clue, from ${character(card.holderId).name}`), el('div', '', card.text), el('div', 'where', 'Kept in your journal (J).'));
       toast.style.display = 'block';
       toast.style.opacity = '1';
       clearTimeout(toastTimer);
