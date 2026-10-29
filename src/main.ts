@@ -284,6 +284,7 @@ async function startGame(): Promise<void> {
   if (debug.has('map')) (await import('./debug/map')).showHouseMap(seed);
   if (debug.has('portraits')) (await import('./debug/portraits')).showPortraitSheet(seed);
   if (debug.has('soundboard')) (await import('./debug/soundboard')).showSoundboard(audio);
+  if (debug.has('voices')) (await import('./debug/voices')).showVoicePanel(audio, seed, caseFile);
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
