@@ -31,6 +31,7 @@ import {
   slotOfCell,
 } from './grid';
 import { generateLayout, houseRng, withoutEdges, type ChunkLayout, type SlotLayout } from './layout';
+import { portraitWall } from './stands';
 import type { CellId, Chunk, ChunkDiff, ChunkId, Dir, Door, DoorId, DoorState, KeyRoomState, Room, SizeClass } from './types';
 
 export interface House {
@@ -213,8 +214,15 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
 
   function keyRoomFrom(room: Room, characterId: CharacterId): Room {
     const character = caseFile.characters.find((c) => c.id === characterId)!;
+    // The spirit's portrait on a plain wall, and beneath it a table with an unlit candle (spec 18).
+    const anchors = room.anchors.filter((a) => a.kind !== 'spareCandle');
+    const wall = portraitWall({ ...room, anchors });
+    if (wall) {
+      anchors.push({ kind: 'portrait', cell: wall.cell, side: wall.side, characterId }, { kind: 'candleTable', cell: wall.cell, side: wall.side });
+    }
     return {
       ...room,
+      anchors,
       id: `key:${characterId}`,
       kind: 'key',
       style: character.roomKind,
@@ -447,6 +455,8 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       const frozen = new Set<number>([pack(0, 0)]);
       for (const key of guarded) frozen.add(pack(...chunkOfSlot(...unpack(key))));
       if (diningSlot) frozen.add(pack(...chunkOfSlot(...diningSlot)));
+      // A visited spirit's room stays where the player found it, with its candle and keys (spec 18).
+      for (const keyRoom of keyRooms) if (keyRoom.visited && keyRoom.slot) frozen.add(pack(...chunkOfSlot(...keyRoom.slot)));
 
       // Rebuild every nearby chunk that holds nothing protected.
       const [pcx, pcy] = chunkOfCell(playerCell);

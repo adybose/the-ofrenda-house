@@ -1,6 +1,7 @@
 import type { RoomKind as KeyRoomStyle } from '../case/types';
 import { createRng } from '../core/rng';
 import { DIRS, DIR_STEP, cellId, edgeCells, parseCell } from './grid';
+import { STAND_SIZE, standsOf } from './stands';
 import type { CellId, Dir, Room, RoomKind } from './types';
 import { CELL_SIZE, WALL_INSET, cellCentre } from './units';
 
@@ -29,7 +30,10 @@ export type FurnitureKind =
   | 'pew'
   | 'altar'
   | 'sewingTable'
-  | 'bench';
+  | 'bench'
+  // Spec 18: placed from the room's candle anchors, not drawn from the room's list.
+  | 'candleTable'
+  | 'candleStand';
 
 /** One piece against a wall. Sizes in metres: w along the wall, d out from it, h up. */
 export interface Furniture {
@@ -134,12 +138,16 @@ function blockedCells(room: Room): Set<CellId> {
 
 /** Where a room's furniture stands. Pure, so rendering (04) and collision (05) agree. */
 export function furnishRoom(room: Room, seed: number): Furniture[] {
+  // The candle's table or stand first, where its anchor says (spec 18).
+  const placed: Furniture[] = standsOf(room).map((stand) => {
+    const size = STAND_SIZE[stand.kind];
+    return { kind: stand.kind === 'table' ? 'candleTable' : 'candleStand', cells: [stand.cell], x: stand.x, z: stand.z, ...size, wall: stand.wall };
+  });
   const specs = room.kind === 'key' && room.style ? BY_STYLE[room.style] : BY_KIND[room.kind];
-  if (!specs) return [];
+  if (!specs) return placed;
   const rng = createRng(seed).fork('furniture').fork(room.id);
   const inRoom = new Set(room.cells);
   const used = blockedCells(room);
-  const placed: Furniture[] = [];
 
   // Every free (cell, wall) pair along the room's edge.
   const spots: { cell: CellId; wall: Dir }[] = [];

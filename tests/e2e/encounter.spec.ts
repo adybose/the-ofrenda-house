@@ -1,35 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, imageStats, test } from './fixtures';
-
-interface Mock {
-  prefetchAt: number[];
-}
-
-/** A mock model: a line for each step, and a riddle whose right answer is the first option. */
-async function mockModel(page: Page, answer: () => string): Promise<Mock> {
-  const mock: Mock = { prefetchAt: [] };
-  await page.route('**/api/tts', (route) => route.fulfill({ status: 503, body: '{}' }));
-  await page.route('**/api/spirit/prefetch', (route) => {
-    mock.prefetchAt.push(Date.now());
-    return route.fulfill({ status: 202, contentType: 'application/json', body: '{"queued":1}' });
-  });
-  await page.route('**/api/spirit/line', (route) => {
-    const { step } = route.request().postDataJSON() as { step: string };
-    const lines: Record<string, string> = {
-      greeting: 'Who walks in my house on the night of the dead?',
-      whoAreYou: 'Tell me who you are, stranger.',
-      reaction: 'Hm. So you say.',
-      reward: 'Then hear what I know.',
-      silence: 'No. Go away.',
-    };
-    const body =
-      step === 'riddle'
-        ? { source: 'llm', line: 'What do I keep?', riddle: { question: 'What do I keep?', options: [answer(), 'A candle', 'A spoon', 'A shoe'], correctIndex: 0 } }
-        : { source: 'llm', line: lines[step] ?? '...' };
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-  });
-  return mock;
-}
+import { mockModel, next, walkIn } from './encounter-helpers';
 
 async function boot(page: Page, extra = '') {
   await page.goto(`/?seed=42&skip=act1&debug=encounter,hooks&mute=1${extra}`);
@@ -42,24 +13,6 @@ async function pickRoom(page: Page) {
     const room = window.__encounter!.keyRooms().find((k) => !k.locked && k.doorId && window.__encounter!.clueCount(k.characterId) > 0)!;
     return { characterId: room.characterId, doorId: room.doorId! };
   });
-}
-
-/** Stand at the door, open it with E and walk in with the arrow key until the spirit appears. */
-async function walkIn(page: Page, doorId: string) {
-  await page.evaluate((id) => window.__ofrenda!.standFacingDoor(id, 'outside'), doorId);
-  await page.waitForTimeout(300);
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(600);
-  await page.keyboard.down('ArrowUp');
-  await expect.poll(() => page.evaluate(() => window.__encounter!.active()), { timeout: 8000 }).toBe(true);
-  await page.keyboard.up('ArrowUp');
-}
-
-/** Space past the typing and on. */
-async function next(page: Page) {
-  await page.keyboard.press('Space');
-  await page.waitForTimeout(80);
-  await page.keyboard.press('Space');
 }
 
 test('a whole encounter played with keys only: appear, who are you, riddle, reward; the clue is in the journal', async ({ page }) => {

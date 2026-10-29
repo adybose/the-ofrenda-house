@@ -1,4 +1,4 @@
-import { CylinderGeometry, Group, Mesh, MeshBasicMaterial, type PerspectiveCamera, type Scene, Vector3 } from 'three';
+import { type PerspectiveCamera, type Scene, Vector3 } from 'three';
 import type { AudioEngine } from '../audio/engine';
 import type { CaseFile, Character, CharacterId } from '../case/types';
 import { events } from '../core/events';
@@ -24,6 +24,7 @@ declare module '../core/events' {
     encounterStarted: { characterId: CharacterId };
     encounterEnded: { characterId: CharacterId; outcome: 'reward' | 'silence' };
     clueAwarded: { factId: string };
+    /** A key laid on the spirit's table once it has gone (spec 18). */
     keyAwarded: { keyId: string };
     riddleFailed: { characterId: CharacterId };
     /** True while an encounter runs: the Shadow and the scares hold off (specs 12 and 13). */
@@ -54,11 +55,12 @@ export interface EncountersOptions {
   player: PlayerController;
   dialogue: Dialogue;
   journal: Journal;
-  keys: Set<string>;
   audio: AudioEngine;
   flashlight: Flashlight;
   /** Called when an encounter starts or ends, to turn the player's controls off and on. */
   onActiveChange(active: boolean): void;
+  /** Called once the spirit has gone: its candle lights on a reward, and its keys are laid on its table (spec 18). */
+  onSpiritLeft?(left: { characterId: CharacterId; outcome: 'reward' | 'silence'; keyIds: readonly string[] }): void;
 }
 
 interface Active {
@@ -73,17 +75,17 @@ interface Active {
  * The spirits' encounters (spec 11). Entering a key room whose spirit is unresolved fades the spirit
  * in, turns the player to face it and runs the steps through the reducer (`encounter.ts`): its lines
  * come from the local server or the fallbacks, its choices through the dialogue box, and what it
- * emits goes to the event bus, the journal and the keys. Each spirit's encounter runs once per run.
+ * emits goes to the event bus and the journal; once it has gone, its keys are laid on its table (spec 18).
+ * Each spirit's encounter runs once per run.
  */
 export class Encounters {
   private readonly options: EncountersOptions;
   private readonly voices: ReturnType<typeof assignVoices>;
   private readonly resolved = new Set<CharacterId>();
   private readonly prefetched = new Set<CharacterId>();
-  private readonly candles: { position: [number, number, number]; mesh: Group }[] = [];
   private trustState: TrustState = initialTrust();
   private active: Active | undefined;
-  private leaving: Spirit[] = [];
+  private leaving: { spirit: Spirit; gone(): void }[] = [];
   private readonly forward = new Vector3();
 
   constructor(options: EncountersOptions) {
@@ -110,11 +112,6 @@ export class Encounters {
     return this.active?.spirit;
   }
 
-  /** Candles left burning where spirits found peace, for the candle lights. */
-  extraCandles(): [number, number, number][] {
-    return this.candles.map((c) => c.position);
-  }
-
   /** When the player moves to a new cell: prepare nearby spirits, and start one on entering its room. */
   enterCell(cell: CellId): void {
     const { house, seed } = this.options;
@@ -131,13 +128,15 @@ export class Encounters {
 
   /** Each frame: the spirits' animation and fades, the turn to face the spirit, the torch beam. */
   update(dt: number, time: number): void {
-    for (const spirit of [...this.leaving]) {
+    for (const leaving of [...this.leaving]) {
+      const { spirit } = leaving;
       spirit.setFade(spirit.fade - dt / FADE_OUT);
       spirit.update(time);
       if (spirit.fade <= 0) {
         spirit.removeFromParent();
         spirit.dispose();
-        this.leaving.splice(this.leaving.indexOf(spirit), 1);
+        this.leaving.splice(this.leaving.indexOf(leaving), 1);
+        leaving.gone();
       }
     }
     const active = this.active;
@@ -227,9 +226,16 @@ export class Encounters {
     this.dispatch({ type: 'ended' });
     dialogue.close();
 
-    // It fades: at peace, leaving a candle burning; or in silence.
-    this.leaving.push(spirit);
-    if (outcome === 'reward') this.lightCandle(x + 0.35, z + 0.35);
+    // It fades, at peace or in silence. Once it has gone its keys lie by its candle, whichever it
+    // was, so a locked room never becomes unreachable (spec 18), and a solved spirit's candle lights.
+    const keyIds = this.state().keyIds;
+    this.leaving.push({
+      spirit,
+      gone: () => {
+        for (const keyId of keyIds) events.emit('keyAwarded', { keyId });
+        this.options.onSpiritLeft?.({ characterId: character.id, outcome: outcome === 'reward' ? 'reward' : 'silence', keyIds });
+      },
+    });
     this.resolved.add(character.id);
     journal.meet(character.id);
     this.active = undefined;
@@ -247,9 +253,9 @@ export class Encounters {
     this.emitAll(active.state.emits);
   }
 
-  /** The reducer's outputs: to the event bus, and clues and keys to the player. */
+  /** The reducer's outputs: to the event bus, and clues to the journal. */
   private emitAll(emits: readonly EncounterEmit[]): void {
-    const { caseFile, journal, keys } = this.options;
+    const { caseFile, journal } = this.options;
     for (const emit of emits) {
       switch (emit.name) {
         case 'encounterStarted':
@@ -262,9 +268,7 @@ export class Encounters {
           break;
         }
         case 'keyAwarded':
-          keys.add(emit.keyId);
-          journal.addKey(emit.keyId);
-          events.emit('keyAwarded', { keyId: emit.keyId });
+          // Laid on the table once the spirit has gone (see `run`), not handed over here.
           break;
         case 'riddleFailed':
           events.emit('riddleFailed', { characterId: emit.characterId });
@@ -274,18 +278,5 @@ export class Encounters {
           break;
       }
     }
-  }
-
-  /** A candle left burning on the floor where a spirit found peace. */
-  private lightCandle(x: number, z: number): void {
-    const group = new Group();
-    const wax = new Mesh(new CylinderGeometry(0.03, 0.035, 0.22, 6), new MeshBasicMaterial({ color: 0x8a7f6a }));
-    wax.position.y = 0.11;
-    const flame = new Mesh(new CylinderGeometry(0, 0.018, 0.06, 5), new MeshBasicMaterial({ color: 0xffc46b }));
-    flame.position.y = 0.25;
-    group.add(wax, flame);
-    group.position.set(x, 0, z);
-    this.options.scene.add(group);
-    this.candles.push({ position: [x, 0.3, z], mesh: group });
   }
 }

@@ -30,9 +30,14 @@ export class GeometryBuilder {
    * `uv` gives [u, v] for each corner; `tints` one colour per corner or one for all.
    */
   quad(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, uv: readonly (readonly [number, number])[], tints: Tint | readonly Tint[] = WHITE): void {
-    const e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-    const e2 = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
-    const n = [e1[1]! * e2[2]! - e1[2]! * e2[1]!, e1[2]! * e2[0]! - e1[0]! * e2[2]!, e1[0]! * e2[1]! - e1[1]! * e2[0]!];
+    const cross = (a: Vec3, b: Vec3) => {
+      const e1 = [a[0] - p0[0], a[1] - p0[1], a[2] - p0[2]];
+      const e2 = [b[0] - p0[0], b[1] - p0[1], b[2] - p0[2]];
+      return [e1[1]! * e2[2]! - e1[2]! * e2[1]!, e1[2]! * e2[0]! - e1[0]! * e2[2]!, e1[0]! * e2[1]! - e1[1]! * e2[0]!];
+    };
+    // A triangle drawn as a quad repeats a corner (the prism's cap): then take the normal from p2.
+    let n = cross(p1, p3);
+    if (Math.hypot(n[0]!, n[1]!, n[2]!) < 1e-12) n = cross(p1, p2);
     const len = Math.hypot(n[0]!, n[1]!, n[2]!) || 1;
     const normal: Vec3 = [n[0]! / len, n[1]! / len, n[2]! / len];
     const tint = (i: number): Tint => (Array.isArray(tints[0]) ? (tints as readonly Tint[])[i]! : (tints as Tint));
