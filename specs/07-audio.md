@@ -1,5 +1,5 @@
 # 07: Audio engine
-Status: In progress
+Status: Done
 Depends on: 05, 06
 
 ## Goal
@@ -46,9 +46,9 @@ Must:
 - [x] Playwright: the AudioContext is not running before the first click and is running after it.
 - [x] Unit: thunder delay grows with distance and stays within the clamp.
 - [x] Unit: the impulse response generator is deterministic and gives longer tails for larger rooms.
-- [ ] Manual listening checklist in this spec, ticked: rain, wind, thunder, creak, slam, lock, footsteps, heartbeat, stingers, whispers, bat, rat, cat, cat scream, clock.
-  - [ ] rain  - [ ] wind  - [ ] thunder  - [ ] creak  - [ ] slam  - [ ] lock  - [ ] footsteps
-  - [ ] heartbeat  - [ ] stingers  - [ ] whispers  - [ ] bat  - [ ] rat  - [ ] cat  - [ ] cat scream  - [ ] clock
+- [x] Manual listening checklist in this spec, ticked: rain, wind, thunder, creak, slam, lock, footsteps, heartbeat, stingers, whispers, bat, rat, cat, cat scream, clock.
+  - [x] rain  - [x] wind  - [x] thunder  - [x] creak  - [x] slam  - [x] lock  - [x] footsteps
+  - [x] heartbeat  - [x] stingers  - [x] whispers  - [x] bat  - [x] rat  - [x] cat  - [x] cat scream  - [x] clock
 Should:
 - [x] The number of concurrent one-shots never exceeds the cap during a 60 s stress test.
 - [x] Ambience ducks while the voice bus is active.
@@ -62,7 +62,7 @@ Vitest: thunder delay, impulse responses. Playwright: offline renders of each so
 - `/?seed=42&skip=act1&lightning=10`: the real thing. Click to start audio, F for the torch, E to open the exit, and walk: footsteps change on tile, carpet and stone, doors creak and slam, and thunder follows each flash after its distance delay.
 
 ## Decisions
-- Merged into main on 29 October 2026 ahead of the listening check, at the user's request, so spec 16 could follow. The status stays In progress until the checklist is ticked.
+- Merged into main on 29 October 2026 ahead of the listening check, at the user's request, so spec 16 could follow. The status stayed In progress until the checklist was ticked: the user passed every sound on 29 October 2026, after seven rounds of retuning (below), and `spec/07-audio-tuning` was merged.
 - Nothing audio exists until the first click or key press (`connectGameAudio` listens for it); spec 14's title-screen click will be that gesture.
 - Rain and wind loop indefinitely at no ongoing cost. Rain is a broadband roar, a low body (rain on roof and ground) and two loops of drop impacts from `rainGrains` (white-noise grains with sharp decays and random brightness), 7.3 s and 11.8 s long and played at slightly different speeds, so together they don't repeat for minutes. Each loop's drop density drifts through gusts and lulls rather than staying even. Heavier `splat` drops are played by the engine at random times, so they never recur in the same place. Wind is brown noise through a band-pass whose frequency and level drift on slow oscillators. The rain's level swells and fades on a seeded random path. (A first version scheduled every raindrop for hours ahead and stalled unlocking for over 10 s; a second rendered drops as sine pings, which rang like wind chimes. A unit test now checks the drops' loudest moments are noise, not tones: spectral flatness 0.49 against 0.003 for the old pings.)
 - Thunder has a sub-bass boom (42 to 24 Hz) under the crack and the rolling rumble, and far strikes rumble for up to 8 s. It peaks at about 0.87 close and 0.79 far.
