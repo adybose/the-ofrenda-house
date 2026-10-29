@@ -3,6 +3,7 @@ import type { CaseFile } from '../case/types';
 import { STREAMS, createRng } from '../core/rng';
 import type { PlayerController } from '../player/controller';
 import { createSpirit } from '../render/spirit';
+import { accusationOptions } from '../story/accusation';
 import type { Encounters } from '../story/encounters';
 import type { House } from '../world/house';
 import type { KeyRoomState } from '../world/types';
@@ -35,6 +36,10 @@ export interface EncounterDebug {
   spiritLowest(): number | undefined;
   /** Whether a spirit is on its way out through a wall. */
   leaving(): boolean;
+  /** Spec 21: the killer and the names a spirit offers. */
+  accusation(): { killerId: string; options: { id: string; name: string }[] };
+  toldTheTruth(): boolean;
+  named(): boolean;
 }
 
 declare global {
@@ -91,6 +96,12 @@ export function installEncounterDebug(options: { encounters: Encounters; house: 
       return new Box3().setFromBufferAttribute(figure.geometry.getAttribute('position') as BufferAttribute).applyMatrix4(figure.matrixWorld).min.y;
     },
     leaving: () => encounters.leavingSpirit() !== undefined,
+    accusation: () => ({
+      killerId: caseFile.killerId,
+      options: accusationOptions(caseFile).map((id) => ({ id, name: caseFile.characters.find((c) => c.id === id)!.name })),
+    }),
+    toldTheTruth: () => encounters.trust.toldTheTruth,
+    named: () => encounters.named(),
     spiritRegion() {
       const spirit = encounters.spirit();
       if (!spirit) return undefined;

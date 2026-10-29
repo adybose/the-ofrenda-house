@@ -780,6 +780,66 @@ export function catScream(s: SynthContext): number {
   });
 }
 
+const LAUGH_LEVEL = 0.22;
+
+/**
+ * A spirit laughing as it leaves (spec 21): seven "ha"s, each a breathy "h" opening into a voiced
+ * "a", the pitch sinking from about 260 to 150 Hz as the laugh runs down, with a slap echo so it
+ * rings round the room.
+ */
+export function laugh(s: SynthContext): number {
+  const count = 7;
+  const step = 0.22;
+  const length = count * step;
+  const pitch = 0.95 + s.rng.float() * 0.1;
+  const steps = 64;
+  const curve = Float32Array.from({ length: steps }, (_, i) => {
+    const x = i / (steps - 1);
+    const within = (x * count) % 1;
+    // Down over the whole laugh; each "ha" lifts a little, then falls.
+    return pitch * (260 - 110 * x) * (1 + 0.08 * Math.sin(Math.PI * Math.min(1, within * 1.4)));
+  });
+  const voice = s.ctx.createOscillator();
+  voice.setPeriodicWave(voiceWave(s.ctx, 1.2));
+  voice.frequency.setValueCurveAtTime(curve, s.t, length);
+  rasp(s, 260 * 0.015, 300, s.t + length + 0.1).connect(voice.frequency);
+
+  const envelope = gain(s);
+  const tract = vocalTract(s, [[750, 12, 2], [1200, 8, 3], [2600, 6, 4]], envelope);
+  voice.connect(tract.input);
+  const breath = noise(s, 'white');
+  const breathLevel = gain(s);
+  chain(breath, breathLevel, tract.input);
+  startNoise(breath, s, s.t, length + 0.05);
+
+  envelope.gain.setValueAtTime(0.0001, s.t);
+  breathLevel.gain.setValueAtTime(0, s.t);
+  for (let i = 0; i < count; i++) {
+    const at = s.t + i * step;
+    const level = LAUGH_LEVEL * (1 - i * 0.07);
+    // The "h": a puff of breath, then the voice opens.
+    breathLevel.gain.setValueAtTime(0, at);
+    breathLevel.gain.linearRampToValueAtTime(0.5, at + 0.02);
+    breathLevel.gain.linearRampToValueAtTime(0.08, at + 0.06);
+    envelope.gain.setValueAtTime(0.0001, at);
+    envelope.gain.exponentialRampToValueAtTime(level, at + 0.04);
+    envelope.gain.exponentialRampToValueAtTime(level * 0.6, at + 0.12);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.19);
+  }
+
+  // A slap echo off the walls, darker each time.
+  const echo = s.ctx.createDelay(1);
+  echo.delayTime.value = 0.27;
+  const feedback = gain(s, 0.4);
+  const dark = filter(s, 'lowpass', 2500);
+  envelope.connect(s.out);
+  chain(envelope, echo, dark, feedback, echo);
+  chain(dark, gain(s, 0.6), s.out);
+  voice.start(s.t);
+  voice.stop(s.t + length + 0.05);
+  return length + 1.6;
+}
+
 /** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */
 export function clockTick(input: SynthContext): number {
   const s = withLevel(input, 5);
@@ -821,6 +881,7 @@ export const SYNTHS = {
   cat,
   catScream,
   heartbeat,
+  laugh,
 } as const satisfies Record<string, (s: SynthContext) => number>;
 
 export type SoundName = keyof typeof SYNTHS;

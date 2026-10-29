@@ -72,6 +72,9 @@ export class ShadowController {
     this.rng = createRng(options.seed).fork(STREAMS.shadow).fork('controller');
     options.scene.add(this.figure);
     events.on('riddleFailed', () => this.dispatch({ type: 'riddleFailed' }));
+    events.on('accused', ({ correct }) => {
+      if (!correct) this.dispatch({ type: 'wrongName' });
+    });
   }
 
   get mode(): ShadowMode {

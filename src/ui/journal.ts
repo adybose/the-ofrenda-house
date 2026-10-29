@@ -95,6 +95,7 @@ export function createJournal(options: { caseFile: CaseFile; seed: Seed; onOpenC
   const keyName = (keyId: string) => {
     const id = keyId.replace(/^key:/, '') as CharacterId;
     const owner = caseFile.characters.find((c) => c.id === id);
+    if (keyId === 'key:exit') return 'The key to the way out';
     return owner ? `Key to ${owner.shortName}'s ${spaced(owner.roomKind)}` : keyId;
   };
 
