@@ -15,14 +15,14 @@ export interface PlayOptions {
   delay?: number;
 }
 
-/** Sounds on the stinger bus (dry, never ducked); the storm's own sounds; thunder has a channel of its own. */
-const STINGERS: ReadonlySet<SoundName> = new Set(['stinger']);
+/** Sounds on the stinger bus (dry and close: no room reverb, and the storm ducks under them); the storm's own sounds; thunder has a channel of its own. */
+const STINGERS: ReadonlySet<SoundName> = new Set(['stinger', 'whisper']);
 const STORM: ReadonlySet<SoundName> = new Set(['rain', 'wind', 'splat']);
 
 /** The storm's level: full outside; indoors, quieter the further from a window. */
 const STORM_INDOORS = { far: 0.3, nearWindow: 0.55 };
-/** Thunder is loud outside and still loud, but muffled, inside. */
-const THUNDER_INDOORS = 0.65;
+/** Thunder is loud outside and still loud, but muffled, inside. The master limiter catches its peaks. */
+const THUNDER = { outdoors: 1.4, indoors: 0.9 };
 
 const MAX_ONE_SHOTS = 32;
 /** Ambience level while a voice speaks. */
@@ -240,12 +240,12 @@ export class AudioEngine {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     const near = Math.exp(-this.windowDistance / 4);
-    const cutoff = this.outdoors ? 14_000 : 600 + 7000 * near;
+    const cutoff = this.outdoors ? 14_000 : 600 + 9000 * near;
     this.muffle.frequency.setTargetAtTime(cutoff, now, 0.4);
     const storm = this.outdoors ? 1 : STORM_INDOORS.far + (STORM_INDOORS.nearWindow - STORM_INDOORS.far) * near;
     this.storm.gain.setTargetAtTime(storm, now, 0.4);
     this.thunderMuffle.frequency.setTargetAtTime(this.outdoors ? 14_000 : 1200 + 3000 * near, now, 0.4);
-    this.thunderLevel.gain.setTargetAtTime(this.outdoors ? 1 : THUNDER_INDOORS, now, 0.4);
+    this.thunderLevel.gain.setTargetAtTime(this.outdoors ? THUNDER.outdoors : THUNDER.indoors, now, 0.4);
   }
 
   /** A clock to tick at this position while the player is in its room; undefined stops it. */
@@ -279,7 +279,7 @@ export class AudioEngine {
     const now = ctx.currentTime;
 
     if (now >= this.rainChangeAt) {
-      this.rainTarget = (0.5 + this.rng.float() * 0.5) * (this.outdoors ? 1.6 : 1);
+      this.rainTarget = (0.75 + this.rng.float() * 0.25) * (this.outdoors ? 1.6 : 1);
       this.rainChangeAt = now + 3 + this.rng.float() * 6;
       this.rainLevel.gain.setTargetAtTime(this.rainTarget, now, 2);
     }
@@ -301,7 +301,7 @@ export class AudioEngine {
 
     // The grandfather clock: tick, tock, once a second.
     if (this.clock && now >= this.nextTick) {
-      this.play('clockTick', { position: this.clock, param: this.tock ? 1 : 0, gain: 0.8 });
+      this.play('clockTick', { position: this.clock, param: this.tock ? 1 : 0, gain: 1 });
       this.tock = !this.tock;
       this.nextTick = Math.max(now, this.nextTick) + 1;
     } else if (!this.clock) {

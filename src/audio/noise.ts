@@ -78,3 +78,111 @@ export function rainGrains(rng: Rng, sampleRate: number, seconds: number): Float
   for (let i = 0; i < length; i++) out[i] = Math.max(-1, Math.min(1, out[i]!));
   return out;
 }
+
+/**
+ * Stick-slip friction (after Farnell, Designing Sound): the moments a dry hinge or a rough surface
+ * lets go. Slips come at `rate(t)` a second, jittered by smoothly wandering noise between half and
+ * twice that, so the train never settles into a tone. Fast slips fuse into a squeal; slow ones are
+ * heard as separate cracks.
+ */
+export function slipTimes(rng: Rng, seconds: number, rate: (t: number) => number): number[] {
+  const JITTER_PER_SECOND = 50;
+  const points = Array.from({ length: Math.ceil(seconds * JITTER_PER_SECOND) + 2 }, () => rng.float() * 2 - 1);
+  const jitter = (t: number) => {
+    const x = t * JITTER_PER_SECOND;
+    const i = Math.floor(x);
+    const v = points[i]! + (points[i + 1]! - points[i]!) * (x - i);
+    return 0.5 * 4 ** ((v + 1) / 2);
+  };
+  const times: number[] = [];
+  for (let t = 0; ; ) {
+    t += 1 / Math.max(1, rate(t) * jitter(t));
+    if (t >= seconds) return times;
+    times.push(t);
+  }
+}
+
+export interface SlipOptions {
+  /** Seconds each slip takes to die away (before the resonators ring it out). */
+  decay?: number;
+  /** 0: each slip is a clean impulse (a hinge); 1: a burst of noise (a crack of thunder). */
+  rough?: number;
+}
+
+/**
+ * The slips as samples: each a sharp pulse whose strength grows with the force built up since the
+ * last one (a long stick lets go harder), scaled by `amp(t)`. Feed it through resonators.
+ */
+export function stickSlip(rng: Rng, sampleRate: number, seconds: number, rate: (t: number) => number, amp: (t: number) => number, options: SlipOptions = {}): Float32Array {
+  const decay = options.decay ?? 0.002;
+  const rough = options.rough ?? 0;
+  const out = new Float32Array(Math.floor(sampleRate * seconds));
+  let last = 0;
+  for (const t of slipTimes(rng, seconds, rate)) {
+    // Force builds over about a tenth of a second between slips.
+    const strength = Math.sqrt(Math.min(1, (t - last) * 10)) * amp(t);
+    last = t;
+    const start = Math.floor(t * sampleRate);
+    const end = Math.min(out.length, start + Math.ceil(decay * 5 * sampleRate));
+    for (let i = start; i < end; i++) {
+      const grain = 1 - rough + rough * (rng.float() * 2 - 1);
+      out[i] = out[i]! + strength * Math.exp(-(i - start) / sampleRate / decay) * grain;
+    }
+  }
+  for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, out[i]!));
+  return out;
+}
+
+export type WhisperVowel = 'a' | 'e' | 'i' | 'o' | 'u';
+export type WhisperOnset = 's' | 'sh' | 'f' | 'h' | 't' | 'k';
+
+/** The first three formants of each vowel in Hz, a little higher than voiced, as whispers are. */
+export const WHISPER_VOWELS: Record<WhisperVowel, readonly [number, number, number]> = {
+  a: [850, 1300, 2650],
+  e: [600, 1950, 2700],
+  i: [380, 2350, 3100],
+  o: [650, 1000, 2550],
+  u: [420, 950, 2450],
+};
+
+/** Consonants as bands of hiss: sibilants high and narrow, f and h broad, t and k short bursts. */
+export const WHISPER_ONSETS: Record<WhisperOnset, { frequency: number; q: number; level: number; stop: boolean }> = {
+  s: { frequency: 6500, q: 2.5, level: 0.5, stop: false },
+  sh: { frequency: 3000, q: 1.6, level: 0.6, stop: false },
+  f: { frequency: 5000, q: 0.5, level: 0.3, stop: false },
+  h: { frequency: 1600, q: 0.6, level: 0.35, stop: false },
+  t: { frequency: 4200, q: 1.2, level: 0.7, stop: true },
+  k: { frequency: 2600, q: 1.5, level: 0.7, stop: true },
+};
+
+export interface WhisperSyllable {
+  /** Seconds from the start of the phrase. */
+  start: number;
+  onset?: WhisperOnset;
+  onsetLength: number;
+  vowel: WhisperVowel;
+  vowelLength: number;
+  /** Loudness 0..1: the phrase swells in the middle. */
+  level: number;
+}
+
+/**
+ * A whispered phrase of made-up words, about four or five syllables a second: a consonant (most of
+ * the time), a vowel, and now and then a breath between words. It opens with a hiss.
+ */
+export function whisperScore(rng: Rng, seconds: number): WhisperSyllable[] {
+  const vowels = Object.keys(WHISPER_VOWELS) as WhisperVowel[];
+  const onsets = Object.keys(WHISPER_ONSETS) as WhisperOnset[];
+  const score: WhisperSyllable[] = [];
+  let t = 0.02;
+  for (;;) {
+    const onset = score.length === 0 ? rng.pick(['s', 'sh'] as const) : rng.chance(0.75) ? rng.pick(onsets) : undefined;
+    const onsetLength = !onset ? 0 : WHISPER_ONSETS[onset].stop ? 0.02 + rng.float() * 0.015 : 0.06 + rng.float() * 0.06;
+    const vowelLength = 0.09 + rng.float() * 0.09;
+    if (t + onsetLength + vowelLength > seconds) return score;
+    const middle = t + (onsetLength + vowelLength) / 2;
+    const level = (0.55 + 0.45 * Math.sin((Math.PI * middle) / seconds)) * (0.85 + rng.float() * 0.15);
+    score.push({ start: t, onset, onsetLength, vowel: rng.pick(vowels), vowelLength, level });
+    t += onsetLength + vowelLength + (rng.chance(0.25) ? 0.1 + rng.float() * 0.08 : 0.015 + rng.float() * 0.03);
+  }
+}

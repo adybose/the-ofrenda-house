@@ -71,3 +71,17 @@ test('the grandfather clock ticks while the player is in its room, and stops out
   await page.evaluate(() => window.__ofrenda!.place(11.25, -3, 0));
   await expect.poll(() => page.evaluate(() => window.__ofrenda!.ticking())).toBe(true);
 });
+
+test('the rain stands well above the wind, overhead thunder opens with a loud crack, the stinger lingers', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  const render = (name: string, param?: number) =>
+    page.evaluate(([n, p]) => window.__ofrenda!.renderSound(n as never, p as number | undefined), [name, param] as const);
+  const rain = await render('rain');
+  const wind = await render('wind');
+  expect(rain.rms).toBeGreaterThan(wind.rms * 3);
+  // The first half second of a close strike: was 0.31 when it opened with a faint clap.
+  const overhead = await render('thunder', 0.95);
+  expect(overhead.onsetRms).toBeGreaterThan(0.45);
+  expect((await render('stinger')).audibleFor).toBeGreaterThan(4);
+});
