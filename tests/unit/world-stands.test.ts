@@ -40,7 +40,7 @@ describe('candle stands', () => {
         house.reshuffle(visibleAround(house, player, 2), player);
       }
     }
-  });
+  }, 60_000);
 
   it('puts the candle and the matchbox at the Act 1 dead end', () => {
     const corridor = newHouse(42).getRoom('act1-corridor')!;

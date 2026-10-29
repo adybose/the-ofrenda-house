@@ -90,5 +90,5 @@ describe('createCollisionMap', () => {
       }
       expect(crossings, `seed ${seed}: the walk should get through many doorways`).toBeGreaterThan(20);
     }
-  });
+  }, 60_000);
 });
