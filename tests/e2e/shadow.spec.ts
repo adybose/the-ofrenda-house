@@ -91,7 +91,7 @@ test('caught in the dark: the screen goes black and the player is possessed', as
   await boot(page);
   expect(await page.evaluate(() => window.__shadow!.summon(2.5, 'chasing'))).toBe(true);
   await expect.poll(() => mode(page), { timeout: 6000 }).toBe('caught');
-  await expect(page.locator('#caught')).toContainText('You lost. You were possessed by the spirit of La Sombra.');
+  await expect(page.locator('#ending[data-kind="possessed"]')).toContainText('You lost. You were possessed by the spirit of La Sombra.');
   await page.waitForTimeout(4000);
   await page.screenshot({ path: 'artifacts/screenshots/12-caught.png' });
   const names = (await page.evaluate(() => window.__ofrenda!.events())).map((e) => e.name);

@@ -1,5 +1,5 @@
 # 14: Story flow and endings
-Status: Approved
+Status: Done
 Depends on: 11, 12, 13, 18, 20, 21
 
 ## Goal
@@ -23,6 +23,8 @@ The game plays as the story in `docs/story.md`: the door locks behind you, the p
 ```ts
 resolveEnding(input: { named: boolean; toldTheTruth: boolean; caught: boolean; dawnWrong: boolean }): 'true' | 'escape' | 'possessed' | 'trapped'
 gameClock(elapsedMs: number, dawnMinutes: number): { hour: number; minute: number; dawn: boolean }
+clockStart(hhmm: string, dawnMinutes: number): number   // elapsed ms for `&clock=HH:MM`
+events: actStage { stage }, midnight, hourStruck { hour }, dawn
 ```
 
 ## Out of scope
@@ -30,15 +32,15 @@ New mechanics; anything not described in `docs/story.md`. Naming the killer and 
 
 ## Acceptance checks
 Must:
-- [ ] Unit: `resolveEnding` table test covering every combination.
-- [ ] Unit: the clock maps elapsed time to hours correctly and reports dawn at `DAWN_MINUTES`.
-- [ ] Playwright (`?seed=42`, mocks): title, then prologue, the door locks behind the player (screenshot); E on the front door is refused.
-- [ ] Playwright: a scripted run of Act 1 with key presses reaches the midnight chime and Act 2.
-- [ ] Playwright: after Act 1, the thought "There must be a candle somewhere here." shows at the dead end (screenshot).
-- [ ] Playwright: screenshots of all four endings via `&ending=`, the possessed one showing its line.
+- [x] Unit: `resolveEnding` table test covering every combination.
+- [x] Unit: the clock maps elapsed time to hours correctly and reports dawn at `DAWN_MINUTES`.
+- [x] Playwright (`?seed=42`, mocks): title, then prologue, the door locks behind the player (screenshot); E on the front door is refused.
+- [x] Playwright: a scripted run of Act 1 with key presses reaches the midnight chime and Act 2.
+- [x] Playwright: after Act 1, the thought "There must be a candle somewhere here." shows at the dead end (screenshot).
+- [x] Playwright: screenshots of all four endings via `&ending=`, the possessed one showing its line.
 Should:
 - [ ] Manual: Act 1 takes about 3 minutes and Act 2 15 to 25 minutes on a first play.
-- [ ] The title screen shows whether Ollama and Piper were found.
+- [x] The title screen shows whether Ollama and Piper were found.
 
 ## Test plan
 Vitest: ending resolution, clock. Playwright with mock LLM and TTS: prologue, Act 1 scripted run, the candle thought, ending screenshots. Manual: full playthroughs on Thursday and Friday evening.
@@ -48,3 +50,15 @@ Vitest: ending resolution, clock. Playwright with mock LLM and TTS: prologue, Ac
 
 ## Decisions
 - Amended on 29 October 2026 with the user's new design: the accusation at the ofrenda moved to the spirits (21) and to the patriarch at dawn (22); the dining room is revealed by the exit key (21), not by enough clues; dawn no longer always traps the player (22); being caught by La Sombra, not a wrong accusation, is the possessed ending; the candle and matchbox wait at the Act 1 dead end (18). Approved by the user on 30 October 2026.
+- `resolveEnding` with nothing named, no catch and no wrong name at dawn returns trapped: the night ended without a way out.
+- The title screen shows in normal play; with any `debug` flag it is skipped unless `&title=1`, so tests that start outside are unaffected.
+- The prologue's captions: "11 pm, 1 November." / "Your car died on the mountain road, in the storm." / "The only light was a mansion on the hill."
+- The faces in the portrait hall change by showing their `smile` variant over a seeded half of the portraits on each flash, then their own faces again; the patriarch's portrait shows `empty` once he has stepped out of it.
+- In Act 1 the patriarch follows the player but always stays 1.8 m back: he can't catch them. His first line is spoken and captioned (the player keeps control to run); his second, in the dead end, is a dialogue the player reads.
+- Cut for time: the possessed and trapped ending screens say that a new portrait with the player's face hangs in the hall, but don't draw it.
+- `?skip=prologue` starts in the entrance hall with Act 1 to play; `?skip=act1` starts Act 2 at midnight at the dead end; `?skip=exit` also holds every clue and the key to the way out, with the dining room revealed.
+- La Sombra's hours now come from the clock's `hourStruck` (its own 240 s timer is gone); the possessed ending replaces spec 12's caught placeholder.
+- Thoughts that hang off conditions are only checked while nothing else holds the screen, so a script's thought comes first after it (spec 20); and a spirit's candle lights before its keys are seen.
+- The boot test (spec 00) clicks past the title before checking the exterior.
+- Proof: `tests/unit/flow.test.ts`; `tests/e2e/story.spec.ts`: the title (with "Ollama not found" from a mocked health check) and the prologue's captions, the door slamming and staying sealed (`artifacts/screenshots/14-locked-in.png`), E on it logging `doorSealed`; Act 1 by teleports and key presses: strikes in the portrait hall, the bat at the chandelier, "Who are you? How dare you enter my house?", the way back walled up, the dead-end speech, `midnight`, Act 2 and "There must be a candle somewhere here." (`14-dead-end.png`); the four endings with both buttons (`14-ending-true.png`, `-escape`, `-possessed`, `-trapped`); the clock at 2:59 am striking three.
+- Not done (Should): the manual timing of Act 1 and Act 2 on a first play.

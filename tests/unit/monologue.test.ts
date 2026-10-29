@@ -55,6 +55,9 @@ describe('thoughts', () => {
     expect(near.shown).toEqual([{ id: 'seeCandle', text: 'A candle, and matches. Might come in handy.', at: 2.5 }]);
     const low = play(ticks(0, 3, { hasCandle: true, heldLit: true, heldBurnLeft: 50 }));
     expect(low.shown.map((s) => s.id)).toEqual(['candleLow']);
+    // Not while something else holds the screen: a script's thought, thought then, comes first.
+    const held = play([...ticks(0, 3, { nearMatchbox: true }, true), { type: 'think', id: 'findCandle', now: 3.2 }, ...ticks(3.5, 12, { nearMatchbox: true })]);
+    expect(held.shown.map((s) => s.id)).toEqual(['findCandle', 'seeCandle']);
   });
 
   it('fill in the key’s room, and know the key to the way out', () => {

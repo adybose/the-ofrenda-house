@@ -10,6 +10,9 @@ test('boots to a full-window, dim night exterior with no console errors', async 
   const box = await canvas.boundingBox();
   expect(box).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height });
 
+  // Normal play opens on the title screen (spec 14); past it, the exterior.
+  await page.locator('#title').click();
+  await page.waitForTimeout(300);
   const screenshot = await page.screenshot({ path: 'artifacts/screenshots/00-boot.png' });
   expect(screenshot.byteLength).toBeGreaterThan(0);
 

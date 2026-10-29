@@ -7,6 +7,8 @@ export type HudSlot = 'prompt' | 'battery' | 'matches' | 'candles' | 'keys' | 'c
 export interface Hud {
   /** Shows a slot's value; `undefined` hides it. Battery is 0..1, matches a count, the rest text. */
   set(slot: HudSlot, value: string | number | undefined): void;
+  /** Spec 14's candle clock: the time, and a candle burning down with the night left (0..1). */
+  clock(text: string, left: number): void;
 }
 
 export function createHud(options: { prompt: { show(text: string): void; hide(): void } }): Hud {
@@ -30,8 +32,22 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
   const candles = corner('hud-candles', { right: '16px', bottom: '40px' });
   const keys = corner('hud-keys', { right: '16px', bottom: '16px' });
   const clock = corner('hud-clock', { right: '16px', top: '16px' });
+  const candle = el('span');
+  Object.assign(candle.style, { display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '30px', width: '10px', marginRight: '8px', verticalAlign: 'middle' });
+  const flame = el('span');
+  Object.assign(flame.style, { width: '6px', height: '9px', borderRadius: '50% 50% 45% 45%', background: '#ffc46b', boxShadow: '0 0 6px #ffa64a' });
+  const wax = el('span');
+  Object.assign(wax.style, { width: '8px', height: '20px', background: '#d9ceb0' });
+  candle.append(flame, wax);
+  const time = el('span');
 
   return {
+    clock(text, left) {
+      if (!clock.contains(candle)) clock.replaceChildren(candle, time);
+      clock.style.display = 'block';
+      wax.style.height = `${Math.round(2 + 18 * Math.max(0, Math.min(1, left)))}px`;
+      time.textContent = text;
+    },
     set(slot, value) {
       if (slot === 'prompt') {
         if (value === undefined) options.prompt.hide();
