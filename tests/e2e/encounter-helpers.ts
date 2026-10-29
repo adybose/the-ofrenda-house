@@ -50,3 +50,19 @@ export async function next(page: Page) {
   await page.waitForTimeout(80);
   await page.keyboard.press('Space');
 }
+
+/** Plays a whole encounter to its reward: the reply 1, then the riddle's first option (the mock's right answer). */
+export async function winEncounter(page: Page, doorId: string) {
+  await walkIn(page, doorId);
+  await expect(page.locator('#dialogue-text')).toContainText('Who walks', { timeout: 8000 });
+  await next(page);
+  await expect(page.locator('#dialogue-options button')).not.toHaveCount(0, { timeout: 8000 });
+  await page.keyboard.press('Digit1');
+  await expect(page.locator('#dialogue-text')).toContainText('So you say', { timeout: 8000 });
+  await next(page);
+  await expect(page.locator('#dialogue-options button')).toHaveCount(4, { timeout: 8000 });
+  await page.keyboard.press('Digit1');
+  await expect(page.locator('#dialogue-text')).toContainText('hear what I know', { timeout: 8000 });
+  await next(page);
+  await expect.poll(() => page.evaluate(() => window.__encounter!.active())).toBe(false);
+}
