@@ -1,5 +1,5 @@
 import { createRng, type Rng } from '../core/rng';
-import { brownNoise, pinkNoise, rainGrains, whiteNoise } from './noise';
+import { RAIN_LOOP_SECONDS, WHISPER_ONSETS, WHISPER_VARIANTS, WHISPER_VOWELS, brownNoise, pinkNoise, rainGrains, stickSlip, whiteNoise, whisperScore, type SlipOptions } from './noise';
 
 // Every sound in the game, synthesised from oscillators, noise and filters. Each synth builds
 // its nodes on any context (live or offline), connects them to `out`, starts at `t`, and returns
@@ -105,18 +105,174 @@ function tone(s: SynthContext, at: number, from: number, to: number, peak: numbe
   return osc;
 }
 
-const grainCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+const grainCache = new WeakMap<BaseAudioContext, AudioBuffer[]>();
 
-/** An 8 s loop of raindrop impacts (see `rainGrains`): unpitched, so nothing rings like a chime. */
-function grains(ctx: BaseAudioContext): AudioBuffer {
-  let buffer = grainCache.get(ctx);
-  if (!buffer) {
-    const data = rainGrains(createRng(21), ctx.sampleRate, 8);
-    buffer = ctx.createBuffer(1, data.length, ctx.sampleRate);
-    buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
-    grainCache.set(ctx, buffer);
+/** The raindrop loops (see `rainGrains`): two lengths, so their repeats never line up. */
+function grains(ctx: BaseAudioContext, index: 0 | 1): AudioBuffer {
+  let buffers = grainCache.get(ctx);
+  if (!buffers) {
+    buffers = RAIN_LOOP_SECONDS.map((seconds, i) => {
+      const data = rainGrains(createRng(21 + i), ctx.sampleRate, seconds);
+      const buffer = ctx.createBuffer(1, data.length, ctx.sampleRate);
+      buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
+      return buffer;
+    });
+    grainCache.set(ctx, buffers);
   }
-  return buffer;
+  return buffers[index]!;
+}
+
+/** A context whose output passes through an overall level: tune a whole sound with one number. */
+function withLevel(s: SynthContext, level: number): SynthContext {
+  const out = gain(s, level);
+  out.connect(s.out);
+  return { ...s, out };
+}
+
+/** A knock on wood: a short thud with a hollow body resonance. */
+function knock(s: SynthContext, at: number, body: number, peak: number): void {
+  burst(s, at, 'brown', 'lowpass', 380, peak, 0.09);
+  burst(s, at, 'pink', 'bandpass', body, peak * 0.6, 0.06, 4);
+}
+
+/** Stick-slip friction as a one-shot source (see `stickSlip`): creaks, scrapes, crackle. */
+function slips(s: SynthContext, seconds: number, rate: (t: number) => number, amp: (t: number) => number, options?: SlipOptions): AudioBufferSourceNode {
+  const data = stickSlip(s.rng, s.ctx.sampleRate, seconds, rate, amp, options);
+  const buffer = s.ctx.createBuffer(1, data.length, s.ctx.sampleRate);
+  buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
+  const source = s.ctx.createBufferSource();
+  source.buffer = buffer;
+  return source;
+}
+
+/** A wooden door's body (after Farnell): six broad resonances, a little dry signal, then the panel's short echoes. */
+const WOOD_MODES = [[62.5, 1], [125, 1], [250, 2], [395, 2], [560, 3], [790, 3]] as const;
+const PANEL_DELAYS_MS = [4.52, 5.06, 6.27, 8, 5.48, 7.14, 10.12, 16];
+
+function woodBody(s: SynthContext, lowest = 0): AudioNode {
+  const input = gain(s, 1);
+  const resonance = gain(s, 1);
+  for (const [frequency, q] of WOOD_MODES) if (frequency >= lowest) chain(input, filter(s, 'bandpass', frequency, q), resonance);
+  chain(input, gain(s, 0.2), resonance);
+  const panel = gain(s, 4 / PANEL_DELAYS_MS.length);
+  for (const ms of PANEL_DELAYS_MS) {
+    const delay = s.ctx.createDelay(0.02);
+    delay.delayTime.value = ms / 1000;
+    chain(resonance, delay, panel);
+  }
+  chain(panel, filter(s, 'highpass', 125), s.out);
+  return input;
+}
+
+const clickCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+
+/** A millisecond of decaying noise: the contact that sets a resonator ringing. */
+function click(s: SynthContext, at: number, destination: AudioNode, level = 1): void {
+  let buffer = clickCache.get(s.ctx);
+  if (!buffer) {
+    const length = Math.ceil(s.ctx.sampleRate * 0.002);
+    const data = whiteNoise(createRng(14), length).map((v, i) => v * Math.exp(-i / (length / 5)));
+    buffer = s.ctx.createBuffer(1, length, s.ctx.sampleRate);
+    buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
+    clickCache.set(s.ctx, buffer);
+  }
+  const source = s.ctx.createBufferSource();
+  source.buffer = buffer;
+  chain(source, gain(s, level), destination);
+  source.start(at);
+}
+
+/**
+ * A latch or knob in a wooden door: a dry mechanical click, no ring. A short bright tick and a woody
+ * clack a few milliseconds apart, and a little knock through the door. `pitch` scales the whole
+ * (lower for a heavy bolt), `peak` its loudness.
+ */
+function latchClick(s: SynthContext, at: number, pitch: number, peak: number): void {
+  burst(s, at, 'white', 'bandpass', 2200 * pitch, peak, 0.004, 2.5);
+  burst(s, at + 0.003 + s.rng.float() * 0.003, 'pink', 'bandpass', 650 * pitch, peak * 0.8, 0.012, 3);
+  knock(s, at + 0.002, 240 * pitch, peak * 0.25);
+}
+
+/** Soft clipping: more weight and loudness for thunder and the slam, never past 1. */
+function saturate(s: SynthContext, drive: number, level = 0.95): SynthContext {
+  const shaper = s.ctx.createWaveShaper();
+  const curve = new Float32Array(1025);
+  for (let i = 0; i < curve.length; i++) curve[i] = (level * Math.tanh(drive * ((i / 512) - 1))) / Math.tanh(drive);
+  shaper.curve = curve;
+  shaper.oversample = '2x';
+  shaper.connect(s.out);
+  return { ...s, out: shaper };
+}
+
+const voiceCache = new WeakMap<BaseAudioContext, Map<number, PeriodicWave>>();
+
+/** A voice-like source: harmonics falling off as 1/n^`fall`. 1.5 is soft; nearer 1 is bright and strained. */
+function voiceWave(ctx: BaseAudioContext, fall = 1.5): PeriodicWave {
+  let waves = voiceCache.get(ctx);
+  if (!waves) {
+    waves = new Map();
+    voiceCache.set(ctx, waves);
+  }
+  let wave = waves.get(fall);
+  if (!wave) {
+    const harmonics = 40;
+    const real = new Float32Array(harmonics + 1);
+    const imag = new Float32Array(harmonics + 1);
+    for (let n = 1; n <= harmonics; n++) imag[n] = 1 / n ** fall;
+    wave = ctx.createPeriodicWave(real, imag);
+    waves.set(fall, wave);
+  }
+  return wave;
+}
+
+/**
+ * Irregular voicing: band-limited noise wobbling a pitch at audio rate, about `hz` either way. A little
+ * (1%) is the jitter of any living voice; a lot (15%) is the chaotic harshness of a strained throat.
+ * Returns the node so a second voice can follow it.
+ */
+function rasp(s: SynthContext, hz: number, bandwidth: number, until: number): GainNode {
+  const source = noise(s, 'white', true);
+  const band = filter(s, 'lowpass', bandwidth);
+  const depth = gain(s, hz * 3);
+  chain(source, band, depth);
+  startNoise(source, s, s.t, until - s.t);
+  return depth;
+}
+
+/**
+ * A cat's vocal tract: resonant peaks [Hz, dB, Q] in cascade over the whole spectrum, then the mouth
+ * (a low-pass). Peaks, not band-passes: band-passes would leave single harmonics whistling.
+ */
+function vocalTract(s: SynthContext, formants: readonly (readonly [number, number, number])[], out: AudioNode): { input: AudioNode; peaks: BiquadFilterNode[]; mouth: BiquadFilterNode } {
+  const input = gain(s, 1);
+  let last: AudioNode = input;
+  const peaks = formants.map(([frequency, boost, q]) => {
+    const peak = filter(s, 'peaking', frequency, q);
+    peak.gain.value = boost;
+    last.connect(peak);
+    last = peak;
+    return peak;
+  });
+  const mouth = filter(s, 'lowpass', 7000, 0.5);
+  chain(last, mouth, out);
+  return { input, peaks, mouth };
+}
+
+const pushCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+
+/** One low push of air, a single raised-cosine bump about 18 ms long: all weight, no pitch, nothing to ring. */
+function push(s: SynthContext, at: number, peak: number): void {
+  let buffer = pushCache.get(s.ctx);
+  if (!buffer) {
+    const length = Math.ceil(s.ctx.sampleRate * 0.018);
+    buffer = s.ctx.createBuffer(1, length, s.ctx.sampleRate);
+    buffer.copyToChannel(Float32Array.from({ length }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / length)), 0);
+    pushCache.set(s.ctx, buffer);
+  }
+  const source = s.ctx.createBufferSource();
+  source.buffer = buffer;
+  chain(source, gain(s, peak), filter(s, 'lowpass', 120), s.out);
+  source.start(at);
 }
 
 /** A very slow oscillator scaled to `depth`, added onto a parameter: endless, unrepeating drift. */
@@ -141,7 +297,7 @@ export function rain(s: SynthContext): number {
   const presence = filter(s, 'peaking', 3500, 0.8);
   presence.gain.value = 3;
   const top = filter(s, 'lowpass', 9000);
-  const roarGain = gain(s, 0.16);
+  const roarGain = gain(s, 0.22);
   chain(roar, air, presence, top, roarGain, s.out);
   startNoise(roar, s, s.t, s.seconds);
 
@@ -151,49 +307,97 @@ export function rain(s: SynthContext): number {
   chain(body, low, bodyGain, s.out);
   startNoise(body, s, s.t, s.seconds);
 
-  const drops = s.ctx.createBufferSource();
-  drops.buffer = grains(s.ctx);
-  drops.loop = true;
-  const dropsGain = gain(s, 0.55);
-  chain(drops, dropsGain, s.out);
-  drops.start(s.t, s.rng.float() * 7);
-  drops.stop(until);
+  // Two drop loops of different lengths at slightly different speeds: they drift against each
+  // other and never settle into a rhythm.
+  for (const [index, rate] of [[0, 0.97], [1, 1.04]] as const) {
+    const drops = s.ctx.createBufferSource();
+    drops.buffer = grains(s.ctx, index);
+    drops.loop = true;
+    drops.playbackRate.value = rate;
+    const dropsGain = gain(s, 0.55);
+    chain(drops, dropsGain, s.out);
+    drops.start(s.t, s.rng.float() * RAIN_LOOP_SECONDS[index]);
+    drops.stop(until);
+  }
   return s.seconds;
+}
+
+/** One heavy drop off the eaves or a leaf: the engine scatters these at random over the rain. */
+export function splat(input: SynthContext): number {
+  const s = withLevel(input, 2.5);
+  burst(s, s.t, 'pink', 'bandpass', 1500 + s.rng.float() * 900, 0.45, 0.014, 1);
+  burst(s, s.t, 'brown', 'lowpass', 900, 0.25, 0.03);
+  return 0.1;
 }
 
 export function wind(s: SynthContext): number {
   const until = s.t + s.seconds;
   const source = noise(s, 'brown', true);
   const band = filter(s, 'bandpass', 420, 1.4);
-  const g = gain(s, 0.45);
+  const g = gain(s, 0.25);
   chain(source, band, g, s.out);
   startNoise(source, s, s.t, s.seconds);
   // Gusts: unrelated slow oscillators sliding the band and swelling the level.
   drift(s, band.frequency, 0.071, 170, until);
   drift(s, band.frequency, 0.163, 110, until);
-  drift(s, g.gain, 0.053, 0.2, until);
-  drift(s, g.gain, 0.131, 0.15, until);
+  drift(s, g.gain, 0.053, 0.11, until);
+  drift(s, g.gain, 0.131, 0.08, until);
   return s.seconds;
 }
 
-/** Thunder: param is closeness, 0 (far, a low grumble) to 1 (overhead, a sharp crack). */
-export function thunder(s: SynthContext): number {
-  const close = Math.min(1, Math.max(0, s.param || 0.6));
-  const length = 4 + (1 - close) * 4;
-  if (close > 0.35) burst(s, s.t, 'white', 'highpass', 1200, 0.25 * close, 0.25 + close * 0.2);
+/** Thunder's overall level, and how hard it drives the soft clipper: set from measured levels. */
+const THUNDER_LEVEL = 2.2;
+const THUNDER_DRIVE = 1.6;
+
+/**
+ * Thunder: param is closeness, 0 (far, a low grumble) to 1 (overhead: a ripping crack, then the boom).
+ * Close strikes roll on for seconds, their brightness falling away gradually rather than all at once.
+ */
+export function thunder(input: SynthContext): number {
+  const close = Math.min(1, Math.max(0, input.param || 0.6));
+  const length = close > 0.6 ? 7 + (close - 0.6) * 2.5 : 4.5 + (1 - close) * 4;
+  const s = withLevel(saturate(input, THUNDER_DRIVE), THUNDER_LEVEL);
+  if (close > 0.6) {
+    // Overhead: a dense, uneven run of shocks that tears across the sky and thins out, opening with a slap.
+    const strength = (close - 0.6) / 0.4;
+    const span = 0.35 + 0.25 * strength;
+    const crackle = slips(s, span, (t) => 2500 * (80 / 2500) ** (t / span), (t) => (1 - t / span) ** 0.7, { decay: 0.0015, rough: 1 });
+    chain(crackle, filter(s, 'highpass', 300), gain(s, 0.5 + 0.6 * strength), s.out);
+    crackle.start(s.t);
+    burst(s, s.t, 'white', 'lowpass', 5000, 0.2 + 0.4 * strength, 0.06);
+    // The roll that carries on from the crack: bright at first, darkening and fading over seconds.
+    const roll = noise(s, 'pink', true);
+    const shade = filter(s, 'lowpass', 4000, 0.7);
+    shade.frequency.setValueAtTime(4000, s.t);
+    shade.frequency.exponentialRampToValueAtTime(300, s.t + 4);
+    const fade = gain(s, 0.0001);
+    fade.gain.setValueAtTime(0.0001, s.t);
+    fade.gain.exponentialRampToValueAtTime(0.35 * (0.6 + 0.4 * strength), s.t + 0.25);
+    fade.gain.exponentialRampToValueAtTime(0.0001, s.t + 4.2);
+    chain(roll, shade, fade, s.out);
+    startNoise(roll, s, s.t, 4.3);
+  } else if (close > 0.35) {
+    burst(s, s.t, 'white', 'highpass', 1200, 0.25 * close, 0.25 + close * 0.2);
+  }
   // The boom you feel more than hear.
-  tone(s, s.t + 0.05 + (1 - close) * 0.3, 42, 24, 0.3 + 0.15 * close, 0.06, 2.5);
+  tone(s, s.t + 0.05 + (1 - close) * 0.3, 42, 24, 0.3 + 0.3 * close, 0.06, 2.8);
+  // The rumble: its low-pass slides down over the whole strike, so it darkens gradually.
   const rumble = noise(s, 'brown', true);
-  const low = filter(s, 'lowpass', 140 + close * 360, 0.9);
+  const top = 140 + close * 360;
+  const low = filter(s, 'lowpass', top * (1 + 4 * close), 0.9);
+  low.frequency.setValueAtTime(top * (1 + 4 * close), s.t);
+  low.frequency.exponentialRampToValueAtTime(Math.min(top, 250), s.t + length);
   const g = gain(s, 0.0001);
   chain(rumble, low, g, s.out);
   startNoise(rumble, s, s.t, length);
+  const loud = 1 + 0.5 * close;
   g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(0.42, s.t + 0.08 + (1 - close) * 0.5);
-  // Rolling: a few lurches as the sound arrives from different parts of the strike.
+  g.gain.exponentialRampToValueAtTime(0.42 * loud, s.t + 0.08 + (1 - close) * 0.5);
+  // Rolling: lurches as the sound arrives from different parts of the strike, riding a long decay.
   let at = s.t + 0.4;
-  while (at < s.t + length - 0.8) {
-    g.gain.linearRampToValueAtTime(0.15 + s.rng.float() * 0.27, at);
+  while (at < s.t + length - 1) {
+    const decay = Math.exp(-(at - s.t) / (length * 0.4));
+    g.gain.linearRampToValueAtTime((0.25 + s.rng.float() * 0.2) * loud * decay, at);
     at += 0.25 + s.rng.float() * 0.6;
   }
   g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
@@ -202,57 +406,84 @@ export function thunder(s: SynthContext): number {
 
 // ---- Doors and keys ----
 
-export function creak(s: SynthContext): number {
-  const length = 0.9 + s.rng.float() * 0.6;
-  // Stick-slip: a slow, wavering sawtooth through a narrow resonance, like a dry hinge.
-  const saw = s.ctx.createOscillator();
-  saw.type = 'sawtooth';
-  const steps = 24;
-  const rate = new Float32Array(steps);
-  for (let i = 0; i < steps; i++) rate[i] = 18 + s.rng.float() * 30 + (i / steps) * 15;
-  saw.frequency.setValueCurveAtTime(rate, s.t, length);
-  const band = filter(s, 'bandpass', 650, 14);
-  band.frequency.setValueAtTime(600 + s.rng.float() * 200, s.t);
-  band.frequency.linearRampToValueAtTime(1000 + s.rng.float() * 400, s.t + length);
-  const g = gain(s);
-  g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(3.2, s.t + 0.08);
-  g.gain.setValueAtTime(3.2, s.t + length - 0.2);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  chain(saw, band, g, s.out);
-  saw.start(s.t);
-  saw.stop(s.t + length + 0.05);
-  return length;
+/** Overall levels for the door sounds, set from measured peaks. */
+const CREAK_LEVEL = 2.5;
+const SLAM_LEVEL = 4.5;
+const LOCK_LEVEL = 4;
+const UNLOCK_LEVEL = 3.5;
+
+/**
+ * A door creaking open (stick-slip friction, after Farnell): the dry hinge sticks and lets go hundreds
+ * of times a second, a shrill squeal that slides down into a groan as the door swings. The rate wanders
+ * only a little, so it stays smooth; every slip rings the wooden door and the iron hinge.
+ */
+export function creak(input: SynthContext): number {
+  const s = withLevel(input, CREAK_LEVEL);
+  const length = 1.2 + s.rng.float() * 0.4;
+  const start = 550 + s.rng.float() * 200;
+  const end = 110 + s.rng.float() * 30;
+  const friction = slips(s, length, (t) => start * (end / start) ** ((t / length) ** 1.2), (t) => 1 - 0.6 * (t / length), { decay: 0.003, jitter: 1.25 });
+  const soft = filter(s, 'lowpass', 4000);
+  const envelope = gain(s);
+  envelope.gain.setValueAtTime(0.0001, s.t);
+  envelope.gain.exponentialRampToValueAtTime(1, s.t + 0.08);
+  envelope.gain.setValueAtTime(1, s.t + length * 0.5);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
+  chain(friction, soft, envelope);
+  envelope.connect(woodBody(s));
+  for (const [frequency, q, level] of [[1150, 7, 0.5], [2300, 9, 0.2]] as const) {
+    chain(envelope, filter(s, 'bandpass', frequency * (0.9 + s.rng.float() * 0.2), q), gain(s, level), s.out);
+  }
+  friction.start(s.t);
+  return length + 0.1;
 }
 
-export function slam(s: SynthContext): number {
-  tone(s, s.t, 75, 42, 0.55, 0.004, 0.45);
-  burst(s, s.t, 'brown', 'lowpass', 900, 0.4, 0.3);
-  // The frame and hinges rattle a moment after.
-  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2500, 0.08, 0.03, 4);
-  return 0.6;
-}
-
-function metalClick(s: SynthContext, at: number, pitch: number, peak: number): void {
-  burst(s, at, 'white', 'bandpass', pitch * 1.3, peak, 0.02, 6);
-  tone(s, at, pitch, pitch * 0.98, peak * 0.4, 0.001, 0.07);
-}
-
-/** Trying a locked door: the latch catches and the handle rattles. */
-export function lock(s: SynthContext): number {
-  metalClick(s, s.t, 2800, 0.35);
-  metalClick(s, s.t + 0.11, 2300, 0.3);
-  for (let i = 0; i < 3; i++) metalClick(s, s.t + 0.25 + i * 0.07, 2000 + s.rng.float() * 600, 0.15);
-  return 0.6;
-}
-
-/** A key turning: two clicks and the bolt drawing back. */
-export function unlock(s: SynthContext): number {
-  metalClick(s, s.t, 2200, 0.3);
-  metalClick(s, s.t + 0.09, 3100, 0.3);
-  tone(s, s.t + 0.16, 210, 150, 0.35, 0.003, 0.12, 'triangle');
-  burst(s, s.t + 0.16, 'brown', 'lowpass', 600, 0.2, 0.1);
+/**
+ * A wooden door slammed: a sharp crack as it hits the frame (broadband, ringing the wood), a low-mid
+ * thud from the panel and the air it moves, gone within a few tenths of a second, and the latch
+ * snapping home. Not sub-bass (a drum) and no pitched tone (a plucked string); the room does the rest.
+ */
+export function slam(input: SynthContext): number {
+  const s = withLevel(saturate(input, 1.5, 0.85), SLAM_LEVEL);
+  click(s, s.t, woodBody(s, 100), 4);
+  burst(s, s.t, 'white', 'bandpass', 2200, 0.35, 0.006, 0.6);
+  burst(s, s.t, 'pink', 'bandpass', 170, 0.7, 0.09, 1.2);
+  burst(s, s.t, 'pink', 'bandpass', 330, 0.45, 0.05, 1.5);
+  push(s, s.t, 0.35);
+  latchClick(s, s.t + 0.008, 1, 0.12);
+  for (let i = 0; i < 3; i++) burst(s, s.t + 0.03 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.03, 0.03, 3);
   return 0.4;
+}
+
+/**
+ * Trying a locked door: a soft click as the knob turns, a clack as the latch catches on the bolt and
+ * the door bumps in its frame; a second, weaker jiggle; then a click as the knob springs back.
+ */
+export function lock(input: SynthContext): number {
+  const s = withLevel(input, LOCK_LEVEL);
+  const jiggle = (at: number, strength: number) => {
+    latchClick(s, at, 1.2, 0.25 * strength);
+    latchClick(s, at + 0.09, 0.9, 0.5 * strength);
+    knock(s, at + 0.095, 200, 0.35 * strength);
+  };
+  jiggle(s.t, 1);
+  jiggle(s.t + 0.24, 0.7);
+  latchClick(s, s.t + 0.5, 1.15, 0.3);
+  return 0.65;
+}
+
+/**
+ * A key unlocking the door: small dry ticks as it slides in over the pins, then a click-clunk as the
+ * bolt goes back, felt through the wood, and a last soft click as the knob settles.
+ */
+export function unlock(input: SynthContext): number {
+  const s = withLevel(input, UNLOCK_LEVEL);
+  for (let i = 0; i < 4; i++) latchClick(s, s.t + i * 0.05 + s.rng.float() * 0.015, 1.5, 0.1);
+  latchClick(s, s.t + 0.35, 1, 0.35);
+  latchClick(s, s.t + 0.42, 0.7, 0.6);
+  knock(s, s.t + 0.425, 150, 0.45);
+  latchClick(s, s.t + 0.62, 1.1, 0.2);
+  return 0.75;
 }
 
 // ---- Footsteps ----
@@ -266,16 +497,22 @@ export function footstepWood(s: SynthContext): number {
   return 0.3;
 }
 
+/** A heel on stone tile: like stone, a little higher and harder. */
 export function footstepTile(s: SynthContext): number {
   const rate = 0.9 + s.rng.float() * 0.2;
-  burst(s, s.t, 'white', 'highpass', 1800, 0.3, 0.04, 0.7, rate);
-  burst(s, s.t, 'white', 'bandpass', 3200 * rate, 0.25, 0.05, 5);
-  tone(s, s.t, 160, 120, 0.2, 0.002, 0.05);
-  return 0.2;
+  burst(s, s.t, 'white', 'bandpass', 1900 * rate, 0.35, 0.05, 2);
+  tone(s, s.t, 140 * rate, 100, 0.3, 0.002, 0.06);
+  return 0.25;
 }
 
-export function footstepCarpet(s: SynthContext): number {
-  burst(s, s.t, 'pink', 'lowpass', 420, 0.4, 0.12, 0.7, 0.9 + s.rng.float() * 0.2);
+const CARPET_LEVEL = 2.2;
+
+/** A step on carpet: a muffled thud and the soft brush of the pile. The softest floor, but heard. */
+export function footstepCarpet(input: SynthContext): number {
+  const s = withLevel(input, CARPET_LEVEL);
+  const rate = 0.9 + s.rng.float() * 0.2;
+  burst(s, s.t, 'pink', 'lowpass', 420, 0.4, 0.12, 0.7, rate);
+  burst(s, s.t + 0.01, 'pink', 'bandpass', 1200, 0.12, 0.08, 0.8, rate);
   return 0.25;
 }
 
@@ -319,12 +556,13 @@ export function stinger(s: SynthContext): number {
   const sweep = filter(s, 'lowpass', 300, 2);
   sweep.frequency.setValueAtTime(300, s.t);
   sweep.frequency.exponentialRampToValueAtTime(4200, s.t + 0.35);
-  sweep.frequency.exponentialRampToValueAtTime(900, s.t + 2.2);
+  sweep.frequency.exponentialRampToValueAtTime(800, s.t + 3.2);
   const g = gain(s);
   g.gain.setValueAtTime(0.0001, s.t);
   g.gain.exponentialRampToValueAtTime(0.42, s.t + 0.05);
-  g.gain.setValueAtTime(0.42, s.t + 0.45);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + 2.4);
+  g.gain.setValueAtTime(0.42, s.t + 1);
+  g.gain.exponentialRampToValueAtTime(0.18, s.t + 2.3);
+  g.gain.exponentialRampToValueAtTime(0.0001, s.t + 3.6);
   chain(sweep, g, s.out);
   for (const f of [233, 247, 277, 311, 466, 494]) {
     const osc = s.ctx.createOscillator();
@@ -339,35 +577,69 @@ export function stinger(s: SynthContext): number {
     chain(osc, each, sweep);
     osc.start(s.t);
     vibrato.start(s.t);
-    osc.stop(s.t + 2.5);
-    vibrato.stop(s.t + 2.5);
+    osc.stop(s.t + 3.7);
+    vibrato.stop(s.t + 3.7);
   }
-  burst(s, s.t, 'white', 'highpass', 3200, 0.18, 0.6);
-  return 2.5;
+  burst(s, s.t, 'white', 'highpass', 3200, 0.18, 1);
+  return 3.7;
 }
 
-export function whisper(s: SynthContext): number {
-  const length = 1.6 + s.rng.float() * 0.8;
-  const formants = [650, 1150, 2500].map((f) => filter(s, 'bandpass', f * (0.9 + s.rng.float() * 0.2), 7));
+const WHISPER_LEVEL = 1.6;
+
+/**
+ * Someone whispering in your ear, never quite understood: one of `WHISPER_VARIANTS` (param 1 to 6, or
+ * 0 for any), a slow phrase of made-up syllables as one continuous breath through three vowel formants
+ * that drift from syllable to syllable, with soft hushing consonants. The breath swells and eases
+ * gently, never chopped, close to one ear.
+ */
+export function whisper(input: SynthContext): number {
+  const index = input.param >= 1 && input.param <= WHISPER_VARIANTS.length ? Math.round(input.param) : input.rng.int(1, WHISPER_VARIANTS.length);
+  const variant = WHISPER_VARIANTS[index - 1]!;
+  const ear = input.ctx.createStereoPanner();
+  ear.pan.value = variant.pan;
+  const soft = filter(input, 'lowpass', 5000);
+  chain(soft, ear, input.out);
+  const s = withLevel({ ...input, out: soft }, WHISPER_LEVEL);
+  const score = whisperScore(createRng(variant.seed), variant.seconds);
+  const mouth = (vowel: keyof typeof WHISPER_VOWELS) => WHISPER_VOWELS[vowel].map((f) => f * variant.formants);
+
   const breath = noise(s, 'white');
-  const g = gain(s, 0.0001);
-  for (const f of formants) {
-    breath.connect(f);
-    f.connect(g);
+  const vowel = gain(s, 0);
+  const bands = mouth(score[0]?.vowel ?? 'a').map((frequency, i) => {
+    const band = filter(s, 'bandpass', frequency, [7, 9, 11][i]);
+    chain(breath, band, gain(s, [1, 0.7, 0.4][i]), vowel);
+    return band;
+  });
+  vowel.connect(s.out);
+  const hissSource = noise(s, 'white');
+  const hissBand = filter(s, 'bandpass', 3000, 1.6);
+  const hiss = gain(s, 0);
+  chain(hissSource, hissBand, hiss, s.out);
+
+  for (const [i, syllable] of score.entries()) {
+    const at = s.t + syllable.start;
+    const vowelAt = at + syllable.onsetLength;
+    if (syllable.onset) {
+      const onset = WHISPER_ONSETS[syllable.onset];
+      hissBand.frequency.setValueAtTime(onset.frequency, at);
+      hissBand.Q.setValueAtTime(onset.q, at);
+      hiss.gain.setTargetAtTime(onset.level * syllable.level, at, syllable.onsetLength * 0.4);
+      hiss.gain.setTargetAtTime(0, vowelAt - 0.02, 0.06);
+    }
+    // The mouth drifts towards each vowel; the breath swells slowly into it and eases off.
+    mouth(syllable.vowel).forEach((frequency, k) => bands[k]!.frequency.setTargetAtTime(frequency, vowelAt - 0.1, 0.12));
+    vowel.gain.setTargetAtTime(syllable.level, vowelAt - 0.08, 0.12);
+    // Between words (a longer gap) the breath sinks low; between syllables it only dips.
+    const next = score[i + 1];
+    const end = vowelAt + syllable.vowelLength;
+    const gap = next ? next.start - end : 1;
+    vowel.gain.setTargetAtTime(syllable.level * (gap > 0.1 ? 0.25 : 0.6), end - 0.06, 0.15);
   }
-  g.connect(s.out);
-  startNoise(breath, s, s.t, length);
-  // Syllables: short swells with the vowel shifting between them.
-  let at = s.t;
-  while (at < s.t + length - 0.2) {
-    const syllable = 0.1 + s.rng.float() * 0.16;
-    g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.9 + s.rng.float() * 0.5, at + syllable * 0.3);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + syllable);
-    for (const f of formants) f.frequency.setValueAtTime(f.frequency.value * (0.85 + s.rng.float() * 0.3), at);
-    at += syllable + 0.03 + s.rng.float() * 0.08;
-  }
-  return length;
+  const last = score.at(-1);
+  vowel.gain.setTargetAtTime(0, last ? s.t + last.start + last.onsetLength + last.vowelLength : s.t, 0.15);
+  startNoise(breath, s, s.t, variant.seconds + 0.6);
+  startNoise(hissSource, s, s.t, variant.seconds + 0.6);
+  return variant.seconds + 0.7;
 }
 
 export function bat(s: SynthContext): number {
@@ -400,38 +672,121 @@ export function rat(s: SynthContext): number {
   return 1.2;
 }
 
-export function cat(s: SynthContext): number {
-  const length = 1.5;
+/** How one cat cry goes: the meow and the scream are the same voice, shaped differently. */
+interface MeowShape {
+  length: number;
+  /** Pitch in Hz at x, from 0 to 1 along the cry. */
+  pitch: (x: number) => number;
+  /** The jaw: F1 in Hz at points [x, Hz], and its boost in dB at the start and the end. */
+  f1: readonly (readonly [number, number])[];
+  f1Boost: readonly [number, number];
+  /** F2 and F3 [Hz, dB, Q]: weak and nearly still in a cat's short vocal tract. */
+  upper: readonly (readonly [number, number, number])[];
+  /** The lips' low-pass in Hz at points [x, Hz]. */
+  lips: readonly (readonly [number, number])[];
+  /** Level at points [x, fraction of `level`], after starting from silence. */
+  envelope: readonly (readonly [number, number])[];
+  level: number;
+  /** Jitter as a fraction of the pitch; breath as a fraction of the voice; how fast the harmonics fall. */
+  jitter: number;
+  breath: number;
+  brightness: number;
+}
+
+/**
+ * One cat cry through a short vocal tract (`vocalTract`), after recorded meows: the first formant
+ * does the work, rising as the jaw opens and falling as it closes.
+ */
+function meow(s: SynthContext, shape: MeowShape): number {
+  const { length } = shape;
+  const at = (x: number) => s.t + x * length;
+  const steps = 48;
+  const curve = Float32Array.from({ length: steps }, (_, i) => shape.pitch(i / (steps - 1)));
   const voice = s.ctx.createOscillator();
-  voice.type = 'sawtooth';
-  voice.frequency.setValueAtTime(420, s.t);
-  voice.frequency.exponentialRampToValueAtTime(900, s.t + 0.25);
-  voice.frequency.exponentialRampToValueAtTime(650, s.t + 0.9);
-  voice.frequency.exponentialRampToValueAtTime(380, s.t + length);
-  const vibrato = s.ctx.createOscillator();
-  vibrato.frequency.value = 7;
-  const depth = gain(s, 30);
-  chain(vibrato, depth);
-  depth.connect(voice.frequency);
-  const g = gain(s);
-  g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(0.32, s.t + 0.08);
-  g.gain.setValueAtTime(0.32, s.t + 0.9);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  // Two formants give the "ow" of a yowl.
-  const mix = gain(s, 1);
-  for (const [f, q] of [[950, 5], [1900, 6]] as const) {
-    const band = filter(s, 'bandpass', f, q);
-    chain(voice, band, mix);
-  }
-  chain(voice, filter(s, 'lowpass', 2800), gain(s, 0.15), mix);
-  chain(mix, g, s.out);
+  voice.setPeriodicWave(voiceWave(s.ctx, shape.brightness));
+  voice.frequency.setValueCurveAtTime(curve, s.t, length);
+  rasp(s, Math.max(...curve) * shape.jitter, 300, at(1) + 0.1).connect(voice.frequency);
+
+  const envelope = gain(s);
+  const tract = vocalTract(s, [[shape.f1[0]![1], shape.f1Boost[0], 3], ...shape.upper], envelope);
+  const f1 = tract.peaks[0]!;
+  for (const [x, hz] of shape.f1) f1.frequency.linearRampToValueAtTime(hz, at(x));
+  f1.gain.setValueAtTime(shape.f1Boost[0], at(0.4));
+  f1.gain.linearRampToValueAtTime(shape.f1Boost[1], at(1));
+  tract.mouth.frequency.setValueAtTime(shape.lips[0]![1], s.t);
+  for (const [x, hz] of shape.lips.slice(1)) tract.mouth.frequency.exponentialRampToValueAtTime(hz, at(x));
+  voice.connect(tract.input);
+  const breath = noise(s, 'white');
+  chain(breath, gain(s, shape.breath), tract.input);
+  startNoise(breath, s, s.t, length + 0.05);
+
+  envelope.gain.setValueAtTime(0.0001, s.t);
+  for (const [x, level] of shape.envelope) envelope.gain.exponentialRampToValueAtTime(Math.max(0.0001, shape.level * level), at(x));
+  envelope.connect(s.out);
   voice.start(s.t);
-  vibrato.start(s.t);
-  voice.stop(s.t + length + 0.05);
-  vibrato.stop(s.t + length + 0.05);
-  burst(s, s.t + 0.1, 'white', 'bandpass', 2600, 0.08, 0.8, 2);
+  voice.stop(at(1) + 0.05);
   return length + 0.1;
+}
+
+const CAT_LEVEL = 0.14;
+
+/**
+ * A cat's meow, "m-ia-ow" (after Schötz and colleagues' recordings), on the shrill side: about 780 Hz
+ * rising to 1060 and falling to 700, opening from a closed-mouth "m", fullest as the jaw opens, then tapering away as it
+ * closes to "ow", the jaw's resonance softening with it.
+ */
+export function cat(s: SynthContext): number {
+  const length = 0.7 + s.rng.float() * 0.3;
+  const pitch = 0.95 + s.rng.float() * 0.1;
+  return meow(s, {
+    length,
+    pitch: (x) => pitch * (x < 0.3 ? 780 + 280 * Math.sin((Math.PI / 2) * (x / 0.3)) : 1060 - 360 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7))),
+    f1: [[0, 800], [0.07, 800], [0.4, 1800], [1, 900]],
+    f1Boost: [14, 6],
+    upper: [[3000, 6, 4], [5000, 4, 4]],
+    lips: [[0, 500], [0.1, 7000], [0.6, 7000], [1, 2000]],
+    envelope: [[0.07, 0.3], [0.4, 1], [0.6, 0.55], [0.8, 0.25], [1, 0]],
+    level: CAT_LEVEL,
+    jitter: 0.01,
+    breath: 0.12,
+    brightness: 1.25,
+  });
+}
+
+const CAT_SCREAM_LEVEL = 0.22;
+
+/**
+ * A cat screaming as it bolts (spec 13's scares): a shrill, strained meow, the pain shriek of the Lund
+ * recordings ("short intense cries of tense vowels, often [æ], [ɛ] or [i]", with "great strain at
+ * mouth and throat"). It bursts out on an open [æ], climbs fast from about 950 to 1550 Hz, holds,
+ * and falls away as the mouth closes. A bright, tense voice with a little jitter: no noise bursts,
+ * no growl.
+ */
+export function catScream(s: SynthContext): number {
+  const length = 1 + s.rng.float() * 0.3;
+  const pitch = 0.95 + s.rng.float() * 0.1;
+  return meow(s, {
+    length,
+    pitch: (x) => pitch * (x < 0.25 ? 950 + 600 * Math.sin((Math.PI / 2) * (x / 0.25)) : x < 0.7 ? 1550 - 100 * ((x - 0.25) / 0.45) : 1450 - 600 * Math.sin((Math.PI / 2) * ((x - 0.7) / 0.3))),
+    f1: [[0, 900], [0.2, 1800], [0.7, 1800], [1, 1000]],
+    f1Boost: [7, 4],
+    upper: [[3600, 12, 2], [5000, 10, 2.5]],
+    lips: [[0, 1500], [0.03, 8000], [0.7, 8000], [1, 3000]],
+    envelope: [[0.03, 1], [0.65, 0.9], [0.85, 0.4], [1, 0]],
+    level: CAT_SCREAM_LEVEL,
+    jitter: 0.02,
+    breath: 0.08,
+    brightness: 1,
+  });
+}
+
+/** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */
+export function clockTick(input: SynthContext): number {
+  const s = withLevel(input, 5);
+  const tock = s.param >= 0.5;
+  burst(s, s.t, 'white', 'bandpass', tock ? 1700 : 2400, 0.35, 0.012, 3);
+  burst(s, s.t, 'pink', 'bandpass', tock ? 650 : 900, 0.25, 0.04, 8);
+  return 0.15;
 }
 
 /** One lub-dub. param scales the strength (spec 12's tension). */
@@ -447,6 +802,7 @@ export const SYNTHS = {
   rain,
   wind,
   thunder,
+  splat,
   creak,
   slam,
   lock,
@@ -457,11 +813,13 @@ export const SYNTHS = {
   footstepStone,
   flashlightClick,
   clock,
+  clockTick,
   stinger,
   whisper,
   bat,
   rat,
   cat,
+  catScream,
   heartbeat,
 } as const satisfies Record<string, (s: SynthContext) => number>;
 

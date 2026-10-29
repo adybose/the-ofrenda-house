@@ -191,7 +191,7 @@ async function startGame(): Promise<void> {
 
   // Sound: unlocked by the first click or key press. `?mute=1` keeps it silent (automated tests).
   const audio = new AudioEngine({ seed, muted: url.searchParams.get('mute') === '1' });
-  connectGameAudio(audio, house);
+  connectGameAudio(audio, house, outside ? undefined : startCell);
   audio.setOutdoors(outside);
   let windowCheck = 0;
 

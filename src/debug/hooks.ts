@@ -42,12 +42,17 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  renderSound(name: SoundName): Promise<{ peak: number; rms: number; hasNaN: boolean; seconds: number }>;
+  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness` and `centroid`: how noisy rather than tonal, and how bright (see `spectrum`); `envelope`: RMS per 50 ms. */
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; centroid: number; envelope: number[]; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
   testVoice(seconds: number): void;
   setTension(level: number): void;
+  audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
+  setOutdoors(on: boolean): void;
+  /** Whether a grandfather clock is ticking near the player. */
+  ticking(): boolean;
   /** Where the player is in the arrival (spec 16), and whether the outside still exists. */
   arrival(): { stage: string; exterior: boolean };
   /** Moves to a room of the given kind and frames it for a screenshot. */
@@ -159,26 +164,48 @@ export function installDebugHooks(options: {
     strike: (strikeOptions) => void options.lightning.strike(strikeOptions),
     holdLightning: (level) => options.lightning.hold(level, { yaw: 0.2 }),
     soundNames: () => [...SOUND_NAMES],
-    async renderSound(name) {
-      // Long enough for each sound's tail; thunder close, the clock striking three.
-      const seconds = name === 'thunder' ? 7 : name === 'clock' ? 8 : 3;
-      const param = name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0;
+    async renderSound(name, chosen) {
+      // Long enough for each sound's tail; by default thunder close, the clock striking three.
+      const seconds = name === 'thunder' ? 10 : name === 'clock' ? 8 : name === 'stinger' ? 7 : name === 'whisper' ? 5 : 3;
+      const param = chosen ?? (name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0);
       const samples = await options.audio.renderOffline(name, seconds, param);
+      // Interleaved stereo at 44.1 kHz.
+      const onset = Math.min(samples.length, 44_100);
       let peak = 0;
       let sum = 0;
+      let onsetSum = 0;
+      let last = 0;
       let hasNaN = false;
-      for (const v of samples) {
+      const windows = new Array<number>(Math.ceil(samples.length / onset)).fill(0);
+      const FRAME = 2 * 2205;
+      const envelope = new Array<number>(Math.ceil(samples.length / FRAME)).fill(0);
+      // A one-pole low-pass at 150 Hz, per channel, for the bass.
+      const a = 1 - Math.exp((-2 * Math.PI * 150) / 44_100);
+      const low = [0, 0];
+      let lowSum = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const v = samples[i]!;
         if (Number.isNaN(v)) hasNaN = true;
         peak = Math.max(peak, Math.abs(v));
         sum += v * v;
+        if (i < onset) onsetSum += v * v;
+        windows[Math.floor(i / onset)]! += v * v;
+        envelope[Math.floor(i / FRAME)]! += v * v;
+        const channel = i % 2;
+        low[channel]! += a * (v - low[channel]!);
+        lowSum += low[channel]! ** 2;
+        if (Math.abs(v) > 0.005) last = i;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), hasNaN, seconds };
+      return { peak, rms: Math.sqrt(sum / samples.length), ...spectrum(samples), envelope: envelope.map((e) => Math.sqrt(e / FRAME)), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
     },
     audioState: () => options.audio.state,
     ambienceGain: () => options.audio.levels().ambience,
     masterGain: () => options.audio.levels().master,
     testVoice: (seconds) => options.audio.testVoice(seconds),
     setTension: (level) => options.audio.setTension(level),
+    audioLevels: () => options.audio.levels(),
+    setOutdoors: (on) => options.audio.setOutdoors(on),
+    ticking: () => options.audio.ticking,
     arrival: () => options.arrival(),
     lightningInfo: () => {
       const light = options.lightning.light;
@@ -193,4 +220,41 @@ export function installDebugHooks(options: {
     memory: () => ({ geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures }),
     drawCalls: options.lastDrawCalls,
   };
+}
+
+/**
+ * The spectrum from 300 Hz to 6 kHz, as medians over the loudest frames of the left channel of
+ * interleaved stereo at 44.1 kHz. `flatness`: 0 for pure tones, 1 for flat noise (a whistle scores near
+ * 0, a harsh, breathy cry higher). `centroid`: the spectrum's centre of mass in Hz, its brightness.
+ */
+function spectrum(samples: Float32Array): { flatness: number; centroid: number } {
+  const FRAME = 1024;
+  const left = samples.filter((_, i) => i % 2 === 0);
+  const frames: { start: number; energy: number }[] = [];
+  for (let start = 0; start + FRAME <= left.length; start += FRAME) {
+    let energy = 0;
+    for (let i = start; i < start + FRAME; i++) energy += left[i]! ** 2;
+    frames.push({ start, energy });
+  }
+  frames.sort((a, b) => b.energy - a.energy);
+  const values = frames.slice(0, 12).filter((f) => f.energy > 0).map(({ start }) => {
+    const power: number[] = [];
+    // Bins of 43 Hz: 7 is about 300 Hz, 139 about 6 kHz. A Hann window keeps tones from smearing.
+    for (let k = 7; k <= 139; k++) {
+      let re = 0;
+      let im = 0;
+      for (let n = 0; n < FRAME; n++) {
+        const v = left[start + n]! * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / FRAME));
+        re += v * Math.cos((2 * Math.PI * k * n) / FRAME);
+        im -= v * Math.sin((2 * Math.PI * k * n) / FRAME);
+      }
+      power.push(re * re + im * im + 1e-20);
+    }
+    const total = power.reduce((sum, p) => sum + p, 0);
+    const geometric = Math.exp(power.reduce((sum, p) => sum + Math.log(p), 0) / power.length);
+    const centre = power.reduce((sum, p, i) => sum + p * (i + 7), 0) / total;
+    return { flatness: geometric / (total / power.length), centroid: (centre * 44_100) / FRAME };
+  });
+  const median = (list: number[]) => list.sort((a, b) => a - b)[Math.floor(list.length / 2)] ?? 0;
+  return { flatness: median(values.map((v) => v.flatness)), centroid: median(values.map((v) => v.centroid)) };
 }

@@ -1,7 +1,7 @@
 import type { AudioEngine } from '../audio/engine';
 import { SOUND_NAMES, type SoundName } from '../audio/synths';
 
-const CHECKLIST = ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'footsteps', 'heartbeat', 'stingers', 'whispers', 'bat', 'rat', 'cat', 'clock'];
+const CHECKLIST = ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'footsteps', 'heartbeat', 'stingers', 'whispers', 'bat', 'rat', 'cat', 'cat scream', 'clock'];
 
 /** `?debug=soundboard`: a button for every sound, plus tension and room size, for the listening check. */
 export function showSoundboard(audio: AudioEngine): void {
@@ -23,10 +23,12 @@ export function showSoundboard(audio: AudioEngine): void {
     <label>Tension (heartbeat) <input id="sb-tension" type="range" min="0" max="1" step="0.05" value="0"></label>
     <label style="margin-left:16px">Room <select id="sb-room"><option>small</option><option selected>medium</option><option>large</option></select></label>
     <label style="margin-left:16px">Distance from window (m) <input id="sb-window" type="range" min="0" max="30" step="1" value="2"></label>
+    <label style="margin-left:16px">Storm heard from <select id="sb-outdoors"><option value="inside" selected>inside</option><option value="outside">outside</option></select></label>
     <label style="margin-left:16px">Play 3 m to the <select id="sb-side"><option value="">centre</option><option value="left">left</option><option value="right">right</option></select></label>`;
   document.body.appendChild(panel);
 
-  const params: Partial<Record<SoundName, { param: number; label: string }[]>> = {
+  // No param: the engine chooses (for whispers, a random version).
+  const params: Partial<Record<SoundName, { param?: number; label: string }[]>> = {
     thunder: [
       { param: 1, label: 'thunder (overhead)' },
       { param: 0.3, label: 'thunder (far)' },
@@ -35,11 +37,16 @@ export function showSoundboard(audio: AudioEngine): void {
       { param: 1, label: 'clock (1)' },
       { param: 6, label: 'clock (6, dawn)' },
     ],
+    whisper: [{ label: 'whisper (random)' }, ...[1, 2, 3, 4, 5, 6].map((param) => ({ param, label: `whisper ${param}` }))],
+    clockTick: [
+      { param: 0, label: 'clock tick' },
+      { param: 1, label: 'clock tock' },
+    ],
   };
   const side = panel.querySelector<HTMLSelectElement>('#sb-side')!;
   const buttons = panel.querySelector('#sb-buttons')!;
-  for (const name of SOUND_NAMES.filter((n) => n !== 'rain' && n !== 'wind')) {
-    for (const { param, label } of params[name] ?? [{ param: 0, label: name }]) {
+  for (const name of SOUND_NAMES.filter((n) => n !== 'rain' && n !== 'wind' && n !== 'splat')) {
+    for (const { param, label } of params[name] ?? [{ label: name }]) {
       const button = document.createElement('button');
       button.textContent = label;
       Object.assign(button.style, { font: 'inherit', padding: '4px 10px', cursor: 'pointer' });
@@ -55,5 +62,8 @@ export function showSoundboard(audio: AudioEngine): void {
   panel.querySelector<HTMLInputElement>('#sb-tension')!.addEventListener('input', (e) => audio.setTension(Number((e.target as HTMLInputElement).value)));
   panel.querySelector<HTMLSelectElement>('#sb-room')!.addEventListener('change', (e) => audio.setRoomSize((e.target as HTMLSelectElement).value as 'small' | 'medium' | 'large'));
   panel.querySelector<HTMLInputElement>('#sb-window')!.addEventListener('input', (e) => audio.setWindowDistance(Number((e.target as HTMLInputElement).value)));
+  // Start indoors: the full outdoor storm would bury the quieter sounds.
+  audio.setOutdoors(false);
+  panel.querySelector<HTMLSelectElement>('#sb-outdoors')!.addEventListener('change', (e) => audio.setOutdoors((e.target as HTMLSelectElement).value === 'outside'));
   window.addEventListener('pointerdown', () => void audio.unlock(), { once: true });
 }
