@@ -67,7 +67,7 @@ export function runLightLab(renderer: WebGLRenderer, post: PostPipeline): void {
   const mullions = [add(new BoxGeometry(0.06, 1.9, 0.1), 0, 1.75, WINDOW_Z + 0.05), add(new BoxGeometry(0.9, 0.06, 0.1), 0, 2.0, WINDOW_Z + 0.05)];
 
   const glass = new MeshBasicMaterial({ color: 0x000000 });
-  const flashlight = new Flashlight(scene, renderer);
+  const flashlight = new Flashlight(scene, renderer, { rng: createRng(1), level: 1 });
   const lightning = new Lightning(scene, { rng: createRng(1), window: () => WINDOW, glass, every: 1e9 });
 
   // The torch stands at shoulder height to the pillar's right, pointing at its foot.

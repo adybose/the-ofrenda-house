@@ -13,7 +13,7 @@ import type { CellId, ChunkDiff, DoorId, Room } from '../world/types';
 import { CELL_SIZE, cellCentre } from '../world/units';
 
 /** Events the hook records for tests. */
-const RECORDED = ['arrivalStage', 'interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'lightning', 'encounterStarted', 'encounterEnded', 'clueAwarded', 'keyAwarded', 'riddleFailed', 'encounterActive'] as const;
+const RECORDED = ['arrivalStage', 'interact', 'doorOpened', 'doorClosed', 'doorUnlocked', 'doorLocked', 'doorSealed', 'footstep', 'playerCellChanged', 'flashlightToggled', 'flashlightCutOut', 'lightning', 'encounterStarted', 'encounterEnded', 'clueAwarded', 'keyAwarded', 'riddleFailed', 'encounterActive'] as const;
 
 export type DebugRoomKind = 'filler' | 'key' | 'corridor';
 
@@ -34,7 +34,7 @@ export interface OfrendaDebug {
   /** Recorded game events, oldest first. */
   events(): ({ name: string } & Record<string, unknown>)[];
   giveKey(keyId: string): void;
-  flashlight(): { on: boolean; level: number };
+  flashlight(): { on: boolean; lit: boolean; level: number; critical: boolean };
   /** A lightning strike now. */
   strike(options?: StrikeOptions): void;
   /** Holds a lightning flash at a level through the nearest window (undefined lets go), for screenshots. */
@@ -164,7 +164,7 @@ export function installDebugHooks(options: {
     prompt: () => options.prompt.text(),
     events: () => [...log],
     giveKey: (keyId) => options.keys.add(keyId),
-    flashlight: () => ({ on: options.flashlight.on, level: options.flashlight.level }),
+    flashlight: () => ({ on: options.flashlight.on, lit: options.flashlight.lit, level: options.flashlight.level, critical: options.flashlight.critical }),
     strike: (strikeOptions) => void options.lightning.strike(strikeOptions),
     holdLightning: (level) => options.lightning.hold(level, { yaw: 0.2 }),
     soundNames: () => [...SOUND_NAMES],
