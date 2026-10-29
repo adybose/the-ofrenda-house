@@ -26,6 +26,7 @@ import { Monologue } from './story/thoughts';
 import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
 import { Hazards } from './spirits/hazards';
+import { Scares } from './scares/scares';
 import { ShadowController } from './spirits/shadow-controller';
 import { createCaption } from './ui/caption';
 import { showCaught } from './ui/caught';
@@ -95,10 +96,13 @@ async function startGame(): Promise<void> {
   const doors = new DoorController({ house, view, interactions, hasKey: (key) => keys.has(key) });
   // Candles, matches and keys (spec 18). `&matches=N` puts N matches in the box (debug).
   const items = new ItemsController({ scene, house, interactions, matches: url.searchParams.has('matches') ? Number(url.searchParams.get('matches')) : undefined });
+  // Built once the audio and torch exist (spec 13); it catches up on the chunks loaded before then.
+  let scares: Scares | undefined = undefined;
   const applyDiff = (diff: ChunkDiff, options?: { spread?: boolean }) => {
     view.apply(diff, options);
     doors.sync(diff);
     items.sync(diff);
+    scares?.sync(diff);
   };
 
   // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall,
@@ -263,6 +267,10 @@ async function startGame(): Promise<void> {
   let ended = false;
   events.on('ending', () => (ended = true));
 
+  // Bats, rats and cats (spec 13), in the rooms already loaded and every chunk from now on.
+  scares = new Scares({ seed, house, scene, camera, audio, flashlight, player });
+  scares.sync({ loaded: house.loadedChunks(), unloaded: [] });
+
   // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it
   // plays the finale and the ending.
   finale = new Finale({
@@ -396,7 +404,9 @@ async function startGame(): Promise<void> {
       shadow.update(dt, time / 1000);
       hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
       finale!.update(dt, time / 1000);
-      monologue.update(dt, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
+      const heldOff = caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
+      monologue.update(dt, heldOff);
+      scares!.update(dt, heldOff);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
@@ -440,6 +450,7 @@ async function startGame(): Promise<void> {
   if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
   if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
   if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
+  if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, player, fire: url.searchParams.get('fire') });
 
   document.body.dataset.ready = 'true';
   events.emit('gameReady', { width: window.innerWidth, height: window.innerHeight });
