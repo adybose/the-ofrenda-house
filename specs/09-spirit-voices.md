@@ -1,5 +1,5 @@
 # 09: Spirit voices
-Status: In progress
+Status: Done
 Depends on: 07, 08
 
 ## Goal
@@ -36,7 +36,7 @@ Must:
 - [x] Playwright: the ghost voice chain renders a test WAV offline with non-silent output and no clipping.
 Should:
 - [x] Manual on the M1 Pro: first audio of a 20-word line in under 1.5 s when not cached, recorded here.
-- [ ] Manual listening: each spirit in seed 42 is distinguishable, and La Sombra is unsettling.
+- [x] Manual listening: each spirit in seed 42 is distinguishable, and La Sombra is unsettling.
 
 ## Test plan
 Vitest: TTS route with a fake Piper, missing Piper, cache hits, voice assignment property test. Playwright: offline render of the voice chain. Manual: latency and listening.
@@ -79,3 +79,4 @@ Vitest: TTS route with a fake Piper, missing Piper, cache hits, voice assignment
   - A comma that only sets off a short address is left out of the text Piper reads ("Closer stranger,", "…come here little thief."), so the words run on in one breath.
   - The comma pause is 0.6 s; the sentence pause is unchanged at 0.82 s. The cache format went to 7.
 - Measured afterwards with real Piper, as heard: no gap of 40 ms or more between "Closer" and "stranger" for any spirit, or before La Sombra's "little thief"; 0.60 to 0.69 s before "and tell me"; 0.81 to 0.85 s after "dead?".
+- The user passed the listening check on 29 October 2026, after six rounds of listening (above).
