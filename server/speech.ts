@@ -20,16 +20,32 @@ function pauseFor(mark: string): number {
   return PAUSES.comma;
 }
 
-/** A line split into phrases after its punctuation, each with the pause that follows it. */
+const words = (text: string) => text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+
+/**
+ * A line split into phrases after its punctuation, each with the pause that follows it. A comma that
+ * only sets off a short address ("Closer, stranger", "…, little thief.") is said almost in one breath,
+ * so it doesn't split: one word before it, or just one or two words after it that end the sentence.
+ */
 export function phrases(text: string): Phrase[] {
   const out: Phrase[] = [];
+  const marks = [...text.matchAll(BREAK)];
   let start = 0;
   const add = (end: number, pause: number) => {
     const phrase = text.slice(start, end).trim();
     if (/[\p{L}\p{N}]/u.test(phrase)) out.push({ text: phrase, pause });
     start = end;
   };
-  for (const match of text.matchAll(BREAK)) add(match.index + match[0].length, pauseFor(match[0]));
+  marks.forEach((match, i) => {
+    const end = match.index + match[0].length;
+    if (match[0] === ',') {
+      const next = marks[i + 1];
+      const after = text.slice(end, next ? next.index + next[0].length : text.length);
+      const endsSentence = !next || pauseFor(next[0]) !== PAUSES.comma;
+      if (words(text.slice(start, end)) <= 1 || (endsSentence && words(after) <= 2)) return;
+    }
+    add(end, pauseFor(match[0]));
+  });
   add(text.length, 0);
   if (out.length) out[out.length - 1]!.pause = 0;
   return out;

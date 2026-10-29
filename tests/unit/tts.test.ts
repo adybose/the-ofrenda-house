@@ -114,10 +114,10 @@ describe('POST /api/tts', () => {
 
   it('speaks a line phrase by phrase, one Piper run, with pauses: long after a question, short after a comma', async () => {
     const s = server();
-    const response = await tts(s, { text: 'Who walks here? Closer, stranger.', voiceId: 'en_US-ryan-medium' });
+    const response = await tts(s, { text: 'Who walks here? The candles burn low, and the clock has stopped.', voiceId: 'en_US-ryan-medium' });
     expect(response.statusCode).toBe(200);
     expect(await log()).toHaveLength(1);
-    expect((await readFile(join(dir, 'log.text'), 'utf8')).trim().split('\n')).toEqual(['Who walks here?', 'Closer,', 'stranger.']);
+    expect((await readFile(join(dir, 'log.text'), 'utf8')).trim().split('\n')).toEqual(['Who walks here?', 'The candles burn low,', 'and the clock has stopped.']);
     const wav = response.rawPayload;
     const tiny = 64 * 2;
     expect(wav.readUInt32LE(40)).toBe(3 * tiny + (Math.round(0.85 * 22_050) + Math.round(0.4 * 22_050)) * 2);

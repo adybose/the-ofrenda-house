@@ -24,11 +24,31 @@ describe('phrases', () => {
   it('splits after punctuation, keeping it, with a long pause after a sentence and a short one after a comma', () => {
     expect(phrases('Who walks in my house on the night of the dead? Closer, stranger, and tell me why you are here.')).toEqual([
       { text: 'Who walks in my house on the night of the dead?', pause: PAUSES.sentence },
-      { text: 'Closer,', pause: PAUSES.comma },
-      { text: 'stranger,', pause: PAUSES.comma },
+      // "Come closer, stranger": an address, said almost in one breath, so not split.
+      { text: 'Closer, stranger,', pause: PAUSES.comma },
       { text: 'and tell me why you are here.', pause: 0 },
     ]);
     expect(PAUSES.sentence).toBeGreaterThan(PAUSES.comma * 1.8);
+  });
+
+  it('keeps a short address at the end of a sentence with it: no pause before "little thief"', () => {
+    expect(phrases('You should not have come here, little thief. The house remembers every one of you.')).toEqual([
+      { text: 'You should not have come here, little thief.', pause: PAUSES.sentence },
+      { text: 'The house remembers every one of you.', pause: 0 },
+    ]);
+    expect(phrases('Run, child.')).toEqual([{ text: 'Run, child.', pause: 0 }]);
+  });
+
+  it('still pauses at a comma between longer clauses', () => {
+    expect(phrases('The candles are burning low, and the clock has stopped at midnight.')).toEqual([
+      { text: 'The candles are burning low,', pause: PAUSES.comma },
+      { text: 'and the clock has stopped at midnight.', pause: 0 },
+    ]);
+    expect(phrases('I waited for you, my dear, all night long.')).toEqual([
+      { text: 'I waited for you,', pause: PAUSES.comma },
+      { text: 'my dear,', pause: PAUSES.comma },
+      { text: 'all night long.', pause: 0 },
+    ]);
   });
 
   it('pauses longest at an ellipsis, treats ! ; : and dashes too, and leaves numbers whole', () => {
