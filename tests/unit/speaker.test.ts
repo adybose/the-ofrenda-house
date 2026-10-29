@@ -20,7 +20,7 @@ describe('speak()', () => {
     expect(result).toEqual({ spoken: true, durationMs: Math.round((1.8 / 0.9) * 1000) });
     const [url, init] = fetch.mock.calls[0]! as unknown as [string, { body: string }];
     expect(url).toBe('/api/tts');
-    expect(JSON.parse(init.body)).toEqual({ text: 'Who walks in my house?', voiceId: VOICE.voiceId, rate: lengthScale(VOICE), expression: 0.8 });
+    expect(JSON.parse(init.body)).toEqual({ text: 'Who walks in my house?', voiceId: VOICE.voiceId, rate: lengthScale(VOICE), expression: 0.8, pitch: 0.9 });
     expect(play).toHaveBeenCalledWith({ duration: 1.8 }, VOICE, [1, 2, 3]);
   });
 

@@ -1,9 +1,19 @@
 // Pacing for spoken lines (spec 09): a line is spoken phrase by phrase, each keeping its punctuation
 // so it keeps its intonation, and the phrases are joined with silence, longer after a sentence than
-// after a comma.
+// after a comma. Each phrase's own silence is trimmed first, so the pauses are the same on every voice.
 
-/** Seconds of silence after each kind of punctuation. */
-export const PAUSES = { sentence: 0.85, ellipsis: 1.1, comma: 0.4 } as const;
+/**
+ * Seconds of silence heard after each kind of punctuation: Severo's delivery, the listening check's
+ * favourite (measured 0.86 s after a sentence, 0.40 s at a comma, 0.17 s at "Closer, stranger"), less
+ * the edges `joinWavs` keeps. `address`: a comma that only sets off a short address.
+ */
+export const PAUSES = { sentence: 0.82, ellipsis: 1.05, comma: 0.36, address: 0.16 } as const;
+
+/** Seconds kept at each end of a phrase when its silence is trimmed, so no consonant is clipped. */
+export const TRIM_KEEP = 0.02;
+
+/** Below this a sample counts as silence: about -40 dBFS. */
+const SILENCE = 328;
 
 export interface Phrase {
   text: string;
@@ -25,12 +35,16 @@ const words = (text: string) => text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.
 /**
  * A line split into phrases after its punctuation, each with the pause that follows it. A comma that
  * only sets off a short address ("Closer, stranger", "…, little thief.") is said almost in one breath,
- * so it doesn't split: one word before it, or just one or two words after it that end the sentence.
+ * so it gets the brief `address` pause: one word before it, or just one or two words after it that end
+ * the sentence.
  */
 export function phrases(text: string): Phrase[] {
   const out: Phrase[] = [];
   const marks = [...text.matchAll(BREAK)];
   let start = 0;
+  // The word just after an address ("stranger" in "Closer, stranger, and…") is the address itself:
+  // the comma after it is an ordinary one.
+  let afterAddress = false;
   const add = (end: number, pause: number) => {
     const phrase = text.slice(start, end).trim();
     if (/[\p{L}\p{N}]/u.test(phrase)) out.push({ text: phrase, pause });
@@ -42,9 +56,14 @@ export function phrases(text: string): Phrase[] {
       const next = marks[i + 1];
       const after = text.slice(end, next ? next.index + next[0].length : text.length);
       const endsSentence = !next || pauseFor(next[0]) !== PAUSES.comma;
-      if (words(text.slice(start, end)) <= 1 || (endsSentence && words(after) <= 2)) return;
+      if ((words(text.slice(start, end)) <= 1 && !afterAddress) || (endsSentence && words(after) <= 2)) {
+        add(end, PAUSES.address);
+        afterAddress = true;
+        return;
+      }
     }
     add(end, pauseFor(match[0]));
+    afterAddress = false;
   });
   add(text.length, 0);
   if (out.length) out[out.length - 1]!.pause = 0;
@@ -75,15 +94,42 @@ function readWav(wav: Buffer): Pcm {
   throw new Error('WAV without data');
 }
 
+/** A 16-bit phrase without its leading and trailing silence, keeping `TRIM_KEEP` seconds at each end. */
+function trim(part: Pcm): Buffer {
+  if (part.bits !== 16) return part.data;
+  const frames = part.data.length / (2 * part.channels);
+  const loud = (frame: number) => {
+    for (let c = 0; c < part.channels; c++) if (Math.abs(part.data.readInt16LE((frame * part.channels + c) * 2)) > SILENCE) return true;
+    return false;
+  };
+  let first = 0;
+  while (first < frames && !loud(first)) first++;
+  if (first === frames) return part.data.subarray(0, 0);
+  let last = frames - 1;
+  while (last > first && !loud(last)) last--;
+  const keep = Math.round(TRIM_KEEP * part.rate);
+  const from = Math.max(0, first - keep);
+  const to = Math.min(frames, last + 1 + keep);
+  return part.data.subarray(from * 2 * part.channels, to * 2 * part.channels);
+}
+
+export interface JoinOptions {
+  /** Cut each phrase's own leading and trailing silence first. */
+  trim?: boolean;
+  /** Multiplies every pause: the client's pitch, since playing at that rate stretches silence by 1/pitch. */
+  pauseScale?: number;
+}
+
 /** One WAV of the phrases in order, with `pauses[i]` seconds of silence after phrase i. */
-export function joinWavs(wavs: readonly Buffer[], pauses: readonly number[]): Buffer {
+export function joinWavs(wavs: readonly Buffer[], pauses: readonly number[], options: JoinOptions = {}): Buffer {
   const parts = wavs.map(readWav);
   const { rate, channels, bits } = parts[0]!;
   const block = (channels * bits) / 8;
+  const scale = options.pauseScale ?? 1;
   const pieces: Buffer[] = [];
   parts.forEach((part, i) => {
-    pieces.push(part.data);
-    const pause = i < parts.length - 1 ? (pauses[i] ?? 0) : 0;
+    pieces.push(options.trim ? trim(part) : part.data);
+    const pause = i < parts.length - 1 ? (pauses[i] ?? 0) * scale : 0;
     if (pause > 0) pieces.push(Buffer.alloc(Math.round(pause * rate) * block));
   });
   const data = Buffer.concat(pieces);

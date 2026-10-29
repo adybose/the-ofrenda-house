@@ -37,7 +37,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const bridge: Bridge = createBridge(configFromEnv(options.ollama), {
     onPrefetched(seed, characterId, response) {
       const voice = assignVoices(seed, bridge.caseFor(seed).characters)[characterId];
-      if (voice) tts.prefetch(response.line, voice.voiceId, lengthScale(voice), voice.expression);
+      if (voice) tts.prefetch({ text: response.line, voiceId: voice.voiceId, lengthScale: lengthScale(voice), expression: voice.expression, pitch: voice.pitch });
     },
   });
   server.decorate('llm', bridge);
@@ -46,12 +46,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   server.get('/api/health', async (): Promise<Health> => ({ ok: true, ollama: await bridge.available(), piper: await tts.available() }));
 
   server.post('/api/tts', async (request, reply) => {
-    const body = (request.body ?? {}) as { text?: unknown; voiceId?: unknown; rate?: unknown; expression?: unknown };
+    const body = (request.body ?? {}) as { text?: unknown; voiceId?: unknown; rate?: unknown; expression?: unknown; pitch?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     if (!text || text.length > 600 || !tts.knows(body.voiceId)) return reply.status(400).send({ error: 'text and a known voiceId required' });
     const rate = typeof body.rate === 'number' && body.rate >= 0.5 && body.rate <= 2 ? body.rate : 1;
     const expression = typeof body.expression === 'number' && body.expression >= 0.3 && body.expression <= 0.9 ? body.expression : 0.45;
-    const wav = await tts.synthesize(text, body.voiceId, rate, expression);
+    const pitch = typeof body.pitch === 'number' && body.pitch >= 0.5 && body.pitch <= 1.5 ? body.pitch : 1;
+    const wav = await tts.synthesize({ text, voiceId: body.voiceId, lengthScale: rate, expression, pitch });
     if (!wav) return reply.status(503).send({ error: 'speech unavailable' });
     return reply.type('audio/wav').send(wav);
   });

@@ -6,7 +6,7 @@ Depends on: 07, 08
 Every spirit line is spoken aloud by a local Piper voice that sounds distinct and ghostly, and the game carries on silently with text if Piper is missing.
 
 ## Requirements
-- WHEN the client posts to `/api/tts` with `{ text, voiceId, rate?, expression? }` THE SYSTEM SHALL run Piper locally (`server/tts.ts`) and return `audio/wav`. `rate` is Piper's `length_scale` (above 1 is slower); `expression` its `noise_scale` (how much the intonation varies, 0.3 to 0.9).
+- WHEN the client posts to `/api/tts` with `{ text, voiceId, rate?, expression?, pitch? }` THE SYSTEM SHALL run Piper locally (`server/tts.ts`) and return `audio/wav`. `rate` is Piper's `length_scale` (above 1 is slower); `expression` its `noise_scale` (how much the intonation varies, 0.3 to 0.9); `pitch` the client's playback pitch, so pauses can be written to sound the same after it.
 - THE SYSTEM SHALL speak slowly, with a long pause after ".", "?" and "!", a longer one after an ellipsis, and a shorter one after ",", ";", ":" and a dash.
 - THE SYSTEM SHALL use 3 or 4 English Piper voice models stored in `voices/` (git-ignored), fetched once by `npm run setup:voices` during setup, never at runtime. The chosen voices are recorded in this spec during planning.
 - THE SYSTEM SHALL assign each spirit a voice deterministically from the seed and the character's traits: a base voice plus a pitch offset and a speaking rate (Piper `length_scale`), so no two spirits in a run sound the same.
@@ -19,7 +19,7 @@ Every spirit line is spoken aloud by a local Piper voice that sounds distinct an
 
 ## Interfaces
 ```ts
-POST /api/tts { text, voiceId, rate?, expression? } -> audio/wav | 503
+POST /api/tts { text, voiceId, rate?, expression?, pitch? } -> audio/wav | 503
 assignVoices(seed, characters): Record<CharacterId, { voiceId; pitch; rate }>
 speak(line: string, voice: VoiceSpec, position?: Vec3): Promise<{ spoken: boolean; durationMs?: number }>
 ```
@@ -69,3 +69,9 @@ Vitest: TTS route with a fake Piper, missing Piper, cache hits, voice assignment
   - La Sombra's echo is one short slap (0.14 s, 0.15 feedback, 0.2 level; it was 0.38 s, 0.45, 0.45 and rang 1.9 s past its last word), its double is quieter (0.4, 18 ms behind), and its low-pass opens from 2.2 to 3.4 kHz so consonants come through. Pitch 0.75, from 0.7.
 - After the third listen (29 October 2026): "Closer, stranger" means "come closer, stranger", and "…, little thief" is La Sombra addressing the player; both are said almost in one breath, but every comma got 0.4 s. A comma now doesn't split the line when there is only one word before it, or just one or two words after it that end the sentence: those words stay in one Piper phrase, and Piper's own comma pause is used (measured: about 0.2 s between "Closer" and "stranger", 0.19 s before "little thief"). Other commas keep 0.4 s. The cache format went to 4.
 - The `?debug=voices` lines are test lines written for this panel, not game dialogue (which comes from spec 08's model or its fallbacks): spirits say "Who walks in my house on the night of the dead? Closer, stranger, and tell me why you are here."; La Sombra, which only ever taunts in the game, says "You should not have come here, little thief. The house remembers every one of you."
+- After the fourth listen (29 October 2026): Piper's own comma pause, and its silence at both ends of every phrase, stretch with each voice's pace, its natural speed and the client's pitch shift, so pauses differed from spirit to spirit (Doña Esperanza's 0.4 s comma pause came out at 0.83 s, her "Closer, stranger" at 0.32 s). The user named Severo's delivery the best, so it became the standard. Measured as heard, it had 0.86 s after "…the night of the dead?", 0.17 s between "Closer" and "stranger" and 0.40 s before "and tell me why you are here". Now:
+  - The short address is split again, with its own brief `address` pause.
+  - `joinWavs` trims each phrase's own silence (below about -40 dBFS), keeping 20 ms at each end.
+  - Pauses are written × the spirit's pitch (`/api/tts` takes `pitch`), so they sound the same after the pitch shift.
+  - `PAUSES` are Severo's values less the kept edges: sentence 0.82, ellipsis 1.05, comma 0.36, address 0.16. The cache format went to 6.
+- Measured afterwards with real Piper, as heard (after "dead?", at "Closer, stranger", before "and tell me"): Don Emilio 0.84, 0.15, 0.39; Rafael 0.84, 0.19, 0.41; Doña Esperanza 0.84, 0.18, 0.40; Severo 0.85, 0.15, 0.37; Ernesto 0.84, 0.19, 0.40; Lucía 0.85, 0.19, 0.38; Dr. Pilar 0.83, 0.18, 0.40. La Sombra: 0.16 before "little thief", 0.83 after it. First audio still about 0.8 s uncached.

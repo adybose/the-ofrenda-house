@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateCase } from '../../src/case/generate';
 import { VOICES, assignVoices, lengthScale } from '../../src/dialogue/voices';
 import { buildServer } from '../../server/index';
+import { PAUSES } from '../../server/speech';
 import type { TtsOptions } from '../../server/tts';
 import { startMockOllama, stepOf } from '../mocks/ollama';
 
@@ -112,15 +113,17 @@ describe('POST /api/tts', () => {
     expect(await readFile(join(dir, 'log.text'), 'utf8')).toContain('Who walks in my house?');
   });
 
-  it('speaks a line phrase by phrase, one Piper run, with pauses: long after a question, short after a comma', async () => {
+  it('speaks a line phrase by phrase, one Piper run, with pauses (long after a question, short after a comma) shortened for the pitch', async () => {
     const s = server();
-    const response = await tts(s, { text: 'Who walks here? The candles burn low, and the clock has stopped.', voiceId: 'en_US-ryan-medium' });
+    const response = await tts(s, { text: 'Who walks here? The candles burn low, and the clock has stopped.', voiceId: 'en_US-ryan-medium', pitch: 0.8 });
     expect(response.statusCode).toBe(200);
     expect(await log()).toHaveLength(1);
     expect((await readFile(join(dir, 'log.text'), 'utf8')).trim().split('\n')).toEqual(['Who walks here?', 'The candles burn low,', 'and the clock has stopped.']);
     const wav = response.rawPayload;
     const tiny = 64 * 2;
-    expect(wav.readUInt32LE(40)).toBe(3 * tiny + (Math.round(0.85 * 22_050) + Math.round(0.4 * 22_050)) * 2);
+    // The tiny WAV is loud from its first sample to its last, so trimming keeps it whole. The client
+    // plays it at pitch 0.8, which stretches the silence back to the pauses as heard.
+    expect(wav.readUInt32LE(40)).toBe(3 * tiny + (Math.round(PAUSES.sentence * 0.8 * 22_050) + Math.round(PAUSES.comma * 0.8 * 22_050)) * 2);
   });
 
   it('serves a repeated line from the disk cache without running Piper again', async () => {
@@ -188,7 +191,7 @@ describe('prefetching speech', () => {
     expect(spoken).toContain('Who walks in my house');
     expect(spoken).toContain('I keep the hours');
     // The client's later request for the same line is a cache hit.
-    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: lengthScale(voice), expression: voice.expression });
+    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: lengthScale(voice), expression: voice.expression, pitch: voice.pitch });
     expect(response.statusCode).toBe(200);
     expect(await log()).toHaveLength(2);
   });

@@ -24,22 +24,31 @@ export interface TtsOptions {
   concurrency: number;
 }
 
+/** One line to speak, and how. */
+export interface SpeechRequest {
+  text: string;
+  voiceId: string;
+  /** Piper's length scale: the pace. */
+  lengthScale: number;
+  /** Piper's noise scale: how much the intonation varies. */
+  expression: number;
+  /** The client's playback pitch, which stretches silence by 1/pitch: the pauses are written × pitch. */
+  pitch: number;
+}
+
 export interface Tts {
   available(): Promise<boolean>;
   knows(voiceId: unknown): voiceId is string;
-  /**
-   * WAV bytes for the line, from the disk cache or a fresh Piper run; `undefined` if speech is
-   * unavailable. `lengthScale` sets the pace, `expression` how much the intonation varies.
-   */
-  synthesize(text: string, voiceId: string, lengthScale: number, expression: number): Promise<Buffer | undefined>;
+  /** WAV bytes for the line, from the disk cache or a fresh Piper run; `undefined` if speech is unavailable. */
+  synthesize(request: SpeechRequest): Promise<Buffer | undefined>;
   /** The same, behind any live request, without waiting for it. */
-  prefetch(text: string, voiceId: string, lengthScale: number, expression: number): void;
+  prefetch(request: SpeechRequest): void;
   /** Resolves when nothing is queued or running (for tests). */
   idle(): Promise<void>;
 }
 
 /** Bumped whenever the audio for the same request changes, so old cached WAVs aren't served. */
-const FORMAT = 4;
+const FORMAT = 6;
 
 /** Piper's variation in phoneme timing, below its default of 0.8: an even, measured rhythm. */
 const RHYTHM = 0.6;
@@ -100,7 +109,7 @@ export function createTts(options: TtsOptions): Tts {
    * One Piper run for the whole line: one phrase per stdin line, which Piper 1.8 writes as one WAV each
    * into a folder (`-d`), named by a clock so they sort in order. They're joined with the pauses.
    */
-  async function run(text: string, voiceId: string, lengthScale: number, expression: number, target: string): Promise<Buffer | undefined> {
+  async function run({ text, voiceId, lengthScale, expression, pitch }: SpeechRequest, target: string): Promise<Buffer | undefined> {
     const bin = await findBin();
     const parts = phrases(text);
     if (!bin || !parts.length) return undefined;
@@ -127,7 +136,8 @@ export function createTts(options: TtsOptions): Tts {
       if (!ok) return undefined;
       const files = (await readdir(folder)).filter((f) => f.endsWith('.wav')).sort((a, b) => Number(a.slice(0, -4)) - Number(b.slice(0, -4)));
       if (files.length !== parts.length) return undefined;
-      const wav = joinWavs(await Promise.all(files.map((f) => readFile(join(folder, f)))), parts.map((p) => p.pause));
+      // Each phrase's own silence is trimmed, so only our pauses remain, the same on every voice.
+      const wav = joinWavs(await Promise.all(files.map((f) => readFile(join(folder, f)))), parts.map((p) => p.pause), { trim: true, pauseScale: pitch });
       // Written beside the target and renamed, so a killed run never leaves half a file in the cache.
       await writeFile(`${folder}.wav`, wav);
       await rename(`${folder}.wav`, target);
@@ -152,8 +162,9 @@ export function createTts(options: TtsOptions): Tts {
     }
   }
 
-  function request(text: string, voiceId: string, lengthScale: number, expression: number, priority: 'live' | 'prefetch'): Promise<Buffer | undefined> {
-    const key = createHash('sha256').update(JSON.stringify([FORMAT, voiceId, lengthScale, expression, text])).digest('hex');
+  function request(speech: SpeechRequest, priority: 'live' | 'prefetch'): Promise<Buffer | undefined> {
+    const { text, voiceId, lengthScale, expression, pitch } = speech;
+    const key = createHash('sha256').update(JSON.stringify([FORMAT, voiceId, lengthScale, expression, pitch, text])).digest('hex');
     const pending = inFlight.get(key);
     if (pending) return pending;
     const target = join(options.cacheDir, `${key}.wav`);
@@ -165,7 +176,7 @@ export function createTts(options: TtsOptions): Tts {
       }
       await mkdir(options.cacheDir, { recursive: true });
       return new Promise<Buffer | undefined>((resolve) => {
-        (priority === 'live' ? live : prefetches).push({ run: () => run(text, voiceId, lengthScale, expression, target), resolve });
+        (priority === 'live' ? live : prefetches).push({ run: () => run(speech, target), resolve });
         pump();
       });
     })().finally(() => inFlight.delete(key));
@@ -188,9 +199,9 @@ export function createTts(options: TtsOptions): Tts {
       return true;
     },
     knows: (voiceId): voiceId is string => VOICES.some((v) => v.id === voiceId),
-    synthesize: (text, voiceId, lengthScale, expression) => request(text, voiceId, lengthScale, expression, 'live'),
-    prefetch(text, voiceId, lengthScale, expression) {
-      void request(text, voiceId, lengthScale, expression, 'prefetch');
+    synthesize: (speech) => request(speech, 'live'),
+    prefetch(speech) {
+      void request(speech, 'prefetch');
     },
     async idle() {
       while (inFlight.size > 0) await Promise.allSettled([...inFlight.values()]);
