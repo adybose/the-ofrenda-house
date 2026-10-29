@@ -42,8 +42,8 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass). */
-  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
+  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness`: how noisy rather than tonal it is (see `flatness`). */
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
@@ -193,7 +193,7 @@ export function installDebugHooks(options: {
         lowSum += low[channel]! ** 2;
         if (Math.abs(v) > 0.005) last = i;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
+      return { peak, rms: Math.sqrt(sum / samples.length), flatness: flatness(samples), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
     },
     audioState: () => options.audio.state,
     ambienceGain: () => options.audio.levels().ambience,
@@ -217,4 +217,39 @@ export function installDebugHooks(options: {
     memory: () => ({ geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures }),
     drawCalls: options.lastDrawCalls,
   };
+}
+
+/**
+ * Spectral flatness (0 = pure tones, 1 = flat noise) from 300 Hz to 6 kHz, the median over the
+ * loudest frames of the left channel of interleaved stereo at 44.1 kHz: a whistle scores near 0, a
+ * harsh, breathy cry higher.
+ */
+function flatness(samples: Float32Array): number {
+  const FRAME = 1024;
+  const left = samples.filter((_, i) => i % 2 === 0);
+  const frames: { start: number; energy: number }[] = [];
+  for (let start = 0; start + FRAME <= left.length; start += FRAME) {
+    let energy = 0;
+    for (let i = start; i < start + FRAME; i++) energy += left[i]! ** 2;
+    frames.push({ start, energy });
+  }
+  frames.sort((a, b) => b.energy - a.energy);
+  const values = frames.slice(0, 12).filter((f) => f.energy > 0).map(({ start }) => {
+    const power: number[] = [];
+    // Bins of 43 Hz: 7 is about 300 Hz, 139 about 6 kHz. A Hann window keeps tones from smearing.
+    for (let k = 7; k <= 139; k++) {
+      let re = 0;
+      let im = 0;
+      for (let n = 0; n < FRAME; n++) {
+        const v = left[start + n]! * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / FRAME));
+        re += v * Math.cos((2 * Math.PI * k * n) / FRAME);
+        im -= v * Math.sin((2 * Math.PI * k * n) / FRAME);
+      }
+      power.push(re * re + im * im + 1e-20);
+    }
+    const geometric = Math.exp(power.reduce((sum, p) => sum + Math.log(p), 0) / power.length);
+    return geometric / (power.reduce((sum, p) => sum + p, 0) / power.length);
+  });
+  values.sort((a, b) => a - b);
+  return values[Math.floor(values.length / 2)] ?? 0;
 }

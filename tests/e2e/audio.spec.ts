@@ -88,7 +88,7 @@ test('the rain stands well above the wind, overhead thunder opens with a loud cr
   expect(stinger.audibleFor).toBeLessThan(4);
 });
 
-test('overhead thunder fades gradually and long; the slam is a heavy thud', async ({ page }) => {
+test('overhead thunder fades gradually and long; the slam is a heavy thud, not a plucked string', async ({ page }) => {
   await page.goto('/?seed=42&debug=hooks&mute=1');
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
   const thunder = await page.evaluate(() => window.__ofrenda!.renderSound('thunder', 0.95));
@@ -96,10 +96,24 @@ test('overhead thunder fades gradually and long; the slam is a heavy thud', asyn
   // Half-second windows from 0.5 s to 6 s: none falls under 40% of the one before.
   const fall = thunder.windows.slice(1, 12);
   for (let i = 1; i < fall.length; i++) expect(fall[i]!, `window ${i + 1}`).toBeGreaterThan(fall[i - 1]! * 0.4);
-  // Was 0.085, then 0.126 (bass 0.114).
+  // A thud stops; a plucked string rings on. The ringing version still had 0.2 RMS after half a second.
   const slam = await page.evaluate(() => window.__ofrenda!.renderSound('slam'));
-  expect(slam.rms).toBeGreaterThan(0.19);
-  expect(slam.lowRms).toBeGreaterThan(0.17);
+  expect(slam.windows[1]!).toBeLessThan(slam.windows[0]! * 0.1);
+  expect(slam.audibleFor).toBeLessThan(0.7);
+  // Heavy: loud at once, and mostly bass.
+  expect(slam.onsetRms).toBeGreaterThan(0.35);
+  expect(slam.lowRms).toBeGreaterThan(slam.rms * 0.7);
+});
+
+test('the cats sound like voices: the scream harsh, not a whistle; the meow a voice, not pure tones', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  // Spectral flatness: the whistling scream was 0.002, the meow 0.001; rain is 0.55.
+  const scream = await page.evaluate(() => window.__ofrenda!.renderSound('catScream'));
+  expect(scream.flatness).toBeGreaterThan(0.03);
+  const meow = await page.evaluate(() => window.__ofrenda!.renderSound('cat'));
+  expect(meow.flatness).toBeGreaterThan(0.004);
+  expect(meow.flatness).toBeLessThan(0.1);
 });
 
 test('carpet footsteps are soft but heard, and every whisper version plays', async ({ page }) => {
