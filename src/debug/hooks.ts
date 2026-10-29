@@ -42,8 +42,8 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness`: how noisy rather than tonal it is (see `flatness`). */
-  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
+  /** `audibleFor`: seconds until the last sample above 0.005; `onsetRms`: the level of the first half second; `windows`: RMS per half second; `lowRms`: the level under about 150 Hz (the bass); `flatness`: how noisy rather than tonal it is (see `flatness`); `envelope`: RMS per 50 ms. */
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; lowRms: number; flatness: number; envelope: number[]; onsetRms: number; windows: number[]; audibleFor: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
@@ -177,6 +177,8 @@ export function installDebugHooks(options: {
       let last = 0;
       let hasNaN = false;
       const windows = new Array<number>(Math.ceil(samples.length / onset)).fill(0);
+      const FRAME = 2 * 2205;
+      const envelope = new Array<number>(Math.ceil(samples.length / FRAME)).fill(0);
       // A one-pole low-pass at 150 Hz, per channel, for the bass.
       const a = 1 - Math.exp((-2 * Math.PI * 150) / 44_100);
       const low = [0, 0];
@@ -188,12 +190,13 @@ export function installDebugHooks(options: {
         sum += v * v;
         if (i < onset) onsetSum += v * v;
         windows[Math.floor(i / onset)]! += v * v;
+        envelope[Math.floor(i / FRAME)]! += v * v;
         const channel = i % 2;
         low[channel]! += a * (v - low[channel]!);
         lowSum += low[channel]! ** 2;
         if (Math.abs(v) > 0.005) last = i;
       }
-      return { peak, rms: Math.sqrt(sum / samples.length), flatness: flatness(samples), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
+      return { peak, rms: Math.sqrt(sum / samples.length), flatness: flatness(samples), envelope: envelope.map((e) => Math.sqrt(e / FRAME)), lowRms: Math.sqrt(lowSum / samples.length), onsetRms: Math.sqrt(onsetSum / onset), windows: windows.map((w) => Math.sqrt(w / onset)), audibleFor: last / 2 / 44_100, hasNaN, seconds };
     },
     audioState: () => options.audio.state,
     ambienceGain: () => options.audio.levels().ambience,

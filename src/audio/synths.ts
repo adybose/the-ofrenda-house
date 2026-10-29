@@ -204,18 +204,23 @@ function saturate(s: SynthContext, drive: number, level = 0.95): SynthContext {
   return { ...s, out: shaper };
 }
 
-const voiceCache = new WeakMap<BaseAudioContext, PeriodicWave>();
+const voiceCache = new WeakMap<BaseAudioContext, Map<number, PeriodicWave>>();
 
-/** A voice-like source: harmonics falling off as 1/n^1.5, softer than a sawtooth's buzz. */
-function voiceWave(ctx: BaseAudioContext): PeriodicWave {
-  let wave = voiceCache.get(ctx);
+/** A voice-like source: harmonics falling off as 1/n^`fall`. 1.5 is soft; nearer 1 is bright and strained. */
+function voiceWave(ctx: BaseAudioContext, fall = 1.5): PeriodicWave {
+  let waves = voiceCache.get(ctx);
+  if (!waves) {
+    waves = new Map();
+    voiceCache.set(ctx, waves);
+  }
+  let wave = waves.get(fall);
   if (!wave) {
     const harmonics = 40;
     const real = new Float32Array(harmonics + 1);
     const imag = new Float32Array(harmonics + 1);
-    for (let n = 1; n <= harmonics; n++) imag[n] = 1 / n ** 1.5;
+    for (let n = 1; n <= harmonics; n++) imag[n] = 1 / n ** fall;
     wave = ctx.createPeriodicWave(real, imag);
-    voiceCache.set(ctx, wave);
+    waves.set(fall, wave);
   }
   return wave;
 }
@@ -403,7 +408,7 @@ export function thunder(input: SynthContext): number {
 
 /** Overall levels for the door sounds, set from measured peaks. */
 const CREAK_LEVEL = 2.5;
-const SLAM_LEVEL = 3;
+const SLAM_LEVEL = 4.5;
 const LOCK_LEVEL = 4;
 const UNLOCK_LEVEL = 3.5;
 
@@ -434,27 +439,20 @@ export function creak(input: SynthContext): number {
 }
 
 /**
- * A heavy door slammed: a thud, not a note. One low push of air and a burst of deep noise that stop
- * at once, the low-mid body of the door, its wood, the latch snapping home and the frame rattling.
- * No pitched tones: a falling tone that rings on is a plucked string.
+ * A wooden door slammed: a sharp crack as it hits the frame (broadband, ringing the wood), a low-mid
+ * thud from the panel and the air it moves, gone within a few tenths of a second, and the latch
+ * snapping home. Not sub-bass (a drum) and no pitched tone (a plucked string); the room does the rest.
  */
 export function slam(input: SynthContext): number {
-  const s = withLevel(saturate(input, 2.5), SLAM_LEVEL);
-  push(s, s.t, 1);
-  // The thud: deep noise that lands hard and dies away over a few tenths of a second.
-  const thud = noise(s, 'brown');
-  const fall = gain(s, 0);
-  fall.gain.setValueAtTime(0, s.t);
-  fall.gain.linearRampToValueAtTime(1.6, s.t + 0.003);
-  fall.gain.setTargetAtTime(0, s.t + 0.003, 0.12);
-  fall.gain.setTargetAtTime(0, s.t + 0.45, 0.03);
-  chain(thud, filter(s, 'lowpass', 150), fall, s.out);
-  startNoise(thud, s, s.t, 0.6);
-  burst(s, s.t, 'pink', 'bandpass', 250, 0.35, 0.1, 0.7);
-  click(s, s.t, woodBody(s, 100), 1.5);
-  latchClick(s, s.t + 0.008, 1, 0.1);
-  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.03, 0.03, 3);
-  return 0.6;
+  const s = withLevel(saturate(input, 1.5, 0.85), SLAM_LEVEL);
+  click(s, s.t, woodBody(s, 200), 4);
+  burst(s, s.t, 'white', 'bandpass', 2200, 0.35, 0.006, 0.6);
+  burst(s, s.t, 'pink', 'bandpass', 260, 0.7, 0.09, 1.2);
+  burst(s, s.t, 'pink', 'bandpass', 480, 0.45, 0.05, 1.5);
+  push(s, s.t, 0.1);
+  latchClick(s, s.t + 0.008, 1, 0.12);
+  for (let i = 0; i < 3; i++) burst(s, s.t + 0.03 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.03, 0.03, 3);
+  return 0.4;
 }
 
 /**
@@ -674,121 +672,112 @@ export function rat(s: SynthContext): number {
   return 1.2;
 }
 
+/** How one cat cry goes: the meow and the scream are the same voice, shaped differently. */
+interface MeowShape {
+  length: number;
+  /** Pitch in Hz at x, from 0 to 1 along the cry. */
+  pitch: (x: number) => number;
+  /** The jaw: F1 in Hz at points [x, Hz], and its boost in dB at the start and the end. */
+  f1: readonly (readonly [number, number])[];
+  f1Boost: readonly [number, number];
+  /** F2 and F3 [Hz, dB, Q]: weak and nearly still in a cat's short vocal tract. */
+  upper: readonly (readonly [number, number, number])[];
+  /** The lips' low-pass in Hz at points [x, Hz]. */
+  lips: readonly (readonly [number, number])[];
+  /** Level at points [x, fraction of `level`], after starting from silence. */
+  envelope: readonly (readonly [number, number])[];
+  level: number;
+  /** Jitter as a fraction of the pitch; breath as a fraction of the voice; how fast the harmonics fall. */
+  jitter: number;
+  breath: number;
+  brightness: number;
+}
+
+/**
+ * One cat cry through a short vocal tract (`vocalTract`), after recorded meows: the first formant
+ * does the work, rising as the jaw opens and falling as it closes.
+ */
+function meow(s: SynthContext, shape: MeowShape): number {
+  const { length } = shape;
+  const at = (x: number) => s.t + x * length;
+  const steps = 48;
+  const curve = Float32Array.from({ length: steps }, (_, i) => shape.pitch(i / (steps - 1)));
+  const voice = s.ctx.createOscillator();
+  voice.setPeriodicWave(voiceWave(s.ctx, shape.brightness));
+  voice.frequency.setValueCurveAtTime(curve, s.t, length);
+  rasp(s, Math.max(...curve) * shape.jitter, 300, at(1) + 0.1).connect(voice.frequency);
+
+  const envelope = gain(s);
+  const tract = vocalTract(s, [[shape.f1[0]![1], shape.f1Boost[0], 3], ...shape.upper], envelope);
+  const f1 = tract.peaks[0]!;
+  for (const [x, hz] of shape.f1) f1.frequency.linearRampToValueAtTime(hz, at(x));
+  f1.gain.setValueAtTime(shape.f1Boost[0], at(0.4));
+  f1.gain.linearRampToValueAtTime(shape.f1Boost[1], at(1));
+  tract.mouth.frequency.setValueAtTime(shape.lips[0]![1], s.t);
+  for (const [x, hz] of shape.lips.slice(1)) tract.mouth.frequency.exponentialRampToValueAtTime(hz, at(x));
+  voice.connect(tract.input);
+  const breath = noise(s, 'white');
+  chain(breath, gain(s, shape.breath), tract.input);
+  startNoise(breath, s, s.t, length + 0.05);
+
+  envelope.gain.setValueAtTime(0.0001, s.t);
+  for (const [x, level] of shape.envelope) envelope.gain.exponentialRampToValueAtTime(Math.max(0.0001, shape.level * level), at(x));
+  envelope.connect(s.out);
+  voice.start(s.t);
+  voice.stop(at(1) + 0.05);
+  return length + 0.1;
+}
+
 const CAT_LEVEL = 0.14;
 
 /**
- * A cat's meow, "m-ia-ow" (after Schötz and colleagues' recordings): a voice about 620 Hz rising to
- * 850 and falling to 560, with a living jitter and a little breath, through a short vocal tract whose
- * first formant does the work, rising as the jaw opens and falling as it closes. It opens from a
- * closed-mouth "m" and rounds to "ow" at the end.
+ * A cat's meow, "m-ia-ow" (after Schötz and colleagues' recordings): about 620 Hz rising to 850 and
+ * falling to 560, opening from a closed-mouth "m", fullest as the jaw opens, then tapering away as it
+ * closes to "ow", the jaw's resonance softening with it.
  */
 export function cat(s: SynthContext): number {
   const length = 0.7 + s.rng.float() * 0.3;
   const pitch = 0.95 + s.rng.float() * 0.1;
-  const steps = 32;
-  const curve = new Float32Array(steps);
-  for (let i = 0; i < steps; i++) {
-    const x = i / (steps - 1);
-    curve[i] = pitch * (x < 0.3 ? 620 + 230 * Math.sin((Math.PI / 2) * (x / 0.3)) : 850 - 290 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7)));
-  }
-  const voice = s.ctx.createOscillator();
-  voice.setPeriodicWave(voiceWave(s.ctx));
-  voice.frequency.setValueCurveAtTime(curve, s.t, length);
-  rasp(s, 750 * pitch * 0.01, 300, s.t + length + 0.1).connect(voice.frequency);
-
-  const envelope = gain(s);
-  const tract = vocalTract(s, [[700, 14, 3], [3000, 6, 4], [5000, 4, 4]], envelope);
-  const f1 = tract.peaks[0]!.frequency;
-  f1.setValueAtTime(700, s.t + 0.06);
-  f1.linearRampToValueAtTime(1600, s.t + length * 0.4);
-  f1.linearRampToValueAtTime(800, s.t + length);
-  // The lips: closed on the "m", open on the "ia", rounding on the "ow".
-  const lips = tract.mouth.frequency;
-  lips.setValueAtTime(500, s.t);
-  lips.exponentialRampToValueAtTime(7000, s.t + 0.1);
-  lips.setValueAtTime(7000, s.t + length * 0.6);
-  lips.exponentialRampToValueAtTime(2000, s.t + length);
-  voice.connect(tract.input);
-  const breath = noise(s, 'white');
-  const breathLevel = gain(s);
-  breathLevel.gain.setValueAtTime(0.1, s.t);
-  breathLevel.gain.linearRampToValueAtTime(0.18, s.t + length);
-  chain(breath, breathLevel, tract.input);
-  startNoise(breath, s, s.t, length + 0.05);
-
-  envelope.gain.setValueAtTime(0.0001, s.t);
-  envelope.gain.exponentialRampToValueAtTime(CAT_LEVEL * 0.3, s.t + 0.06);
-  envelope.gain.exponentialRampToValueAtTime(CAT_LEVEL, s.t + length * 0.4);
-  envelope.gain.exponentialRampToValueAtTime(CAT_LEVEL * 0.75, s.t + length * 0.75);
-  envelope.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  envelope.connect(s.out);
-  voice.start(s.t);
-  voice.stop(s.t + length + 0.05);
-  return length + 0.1;
+  return meow(s, {
+    length,
+    pitch: (x) => pitch * (x < 0.3 ? 620 + 230 * Math.sin((Math.PI / 2) * (x / 0.3)) : 850 - 290 * Math.sin((Math.PI / 2) * ((x - 0.3) / 0.7))),
+    f1: [[0, 700], [0.07, 700], [0.4, 1600], [1, 800]],
+    f1Boost: [14, 6],
+    upper: [[3000, 6, 4], [5000, 4, 4]],
+    lips: [[0, 500], [0.1, 7000], [0.6, 7000], [1, 2000]],
+    envelope: [[0.07, 0.3], [0.35, 1], [0.6, 0.55], [0.8, 0.25], [1, 0]],
+    level: CAT_LEVEL,
+    jitter: 0.01,
+    breath: 0.12,
+    brightness: 1.5,
+  });
 }
 
 const CAT_SCREAM_LEVEL = 0.3;
 
 /**
- * A cat screaming as it bolts (spec 13's scares), after recorded snarls and pain shrieks: a spit
- * ("fft!"), then a short, loud, harsh cry about 380 to 520 Hz on an open "a", strained (chaotic,
- * irregular voicing with a subharmonic and a lot of breath), starting on a heavy intake and "stopped
- * suddenly with a slight [o]"; then a second spit.
+ * A cat screaming as it bolts (spec 13's scares): a shrill, strained meow, the pain shriek of the Lund
+ * recordings ("short intense cries of tense vowels, often [æ], [ɛ] or [i]", with "great strain at
+ * mouth and throat"). It bursts out on an open [æ], climbs fast from about 750 to 1250 Hz, holds,
+ * and falls away as the mouth closes. A bright, tense voice with a little jitter: no noise bursts,
+ * no growl.
  */
-export function catScream(input: SynthContext): number {
-  const s = withLevel(saturate(input, 1.5), CAT_SCREAM_LEVEL);
-  const spit = (at: number, level: number) => {
-    burst(s, at, 'white', 'highpass', 1200, 0.5 * level, 0.16);
-    burst(s, at, 'pink', 'bandpass', 3500, 0.35 * level, 0.05, 0.6);
-  };
-  spit(s.t, 1);
-  const at = s.t + 0.22;
-  const length = 0.6 + s.rng.float() * 0.2;
-  const pitch = 0.9 + s.rng.float() * 0.2;
-  const steps = 32;
-  const curve = new Float32Array(steps);
-  for (let i = 0; i < steps; i++) {
-    const x = i / (steps - 1);
-    curve[i] = pitch * (x < 0.15 ? 380 + 140 * Math.sin((Math.PI / 2) * (x / 0.15)) : x < 0.8 ? 520 - 40 * ((x - 0.15) / 0.65) : 480 - 80 * ((x - 0.8) / 0.2));
-  }
-  const strain = rasp(s, 480 * pitch * 0.15, 600, at + length + 0.1);
-  const voice = s.ctx.createOscillator();
-  voice.setPeriodicWave(voiceWave(s.ctx));
-  voice.frequency.setValueCurveAtTime(curve, at, length);
-  strain.connect(voice.frequency);
-  const sub = s.ctx.createOscillator();
-  sub.setPeriodicWave(voiceWave(s.ctx));
-  sub.frequency.setValueCurveAtTime(curve.map((f) => f / 2), at, length);
-  const half = gain(s, 0.5);
-  chain(strain, half);
-  half.connect(sub.frequency);
-
-  const envelope = gain(s);
-  const tract = vocalTract(s, [[1600, 12, 2.5], [3000, 8, 3], [4500, 5, 3]], envelope);
-  // The slight [o] as it stops: the jaw closes.
-  tract.peaks[0]!.frequency.setValueAtTime(1600, at + length - 0.08);
-  tract.peaks[0]!.frequency.linearRampToValueAtTime(900, at + length);
-  voice.connect(tract.input);
-  chain(sub, gain(s, 0.35), tract.input);
-  const breath = noise(s, 'white');
-  const breathLevel = gain(s);
-  // A heavy intake of breath at the start, then strained breath through the cry.
-  breathLevel.gain.setValueAtTime(0.9, at);
-  breathLevel.gain.linearRampToValueAtTime(0.5, at + 0.08);
-  chain(breath, breathLevel, tract.input);
-  startNoise(breath, s, at, length + 0.05);
-
-  envelope.gain.setValueAtTime(0.0001, at);
-  envelope.gain.exponentialRampToValueAtTime(1, at + 0.02);
-  envelope.gain.setValueAtTime(1, at + length - 0.03);
-  envelope.gain.exponentialRampToValueAtTime(0.0001, at + length);
-  envelope.connect(s.out);
-  voice.start(at);
-  sub.start(at);
-  voice.stop(at + length + 0.05);
-  sub.stop(at + length + 0.05);
-  spit(at + length + 0.05, 0.6);
-  return 0.22 + length + 0.3;
+export function catScream(s: SynthContext): number {
+  const length = 1 + s.rng.float() * 0.3;
+  const pitch = 0.95 + s.rng.float() * 0.1;
+  return meow(s, {
+    length,
+    pitch: (x) => pitch * (x < 0.25 ? 750 + 500 * Math.sin((Math.PI / 2) * (x / 0.25)) : x < 0.7 ? 1250 - 100 * ((x - 0.25) / 0.45) : 1150 - 450 * Math.sin((Math.PI / 2) * ((x - 0.7) / 0.3))),
+    f1: [[0, 900], [0.2, 1800], [0.7, 1800], [1, 1000]],
+    f1Boost: [10, 6],
+    upper: [[3200, 9, 2], [5000, 6, 2.5]],
+    lips: [[0, 1500], [0.03, 8000], [0.7, 8000], [1, 3000]],
+    envelope: [[0.03, 1], [0.65, 0.9], [0.85, 0.4], [1, 0]],
+    level: CAT_SCREAM_LEVEL,
+    jitter: 0.02,
+    breath: 0.08,
+    brightness: 1.1,
+  });
 }
 
 /** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */
