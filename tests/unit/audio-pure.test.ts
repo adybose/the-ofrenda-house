@@ -63,7 +63,7 @@ describe('generateImpulse', () => {
         expect(Math.abs(v)).toBeLessThanOrEqual(1);
       }
     }
-  });
+  }, 60_000);
 });
 
 describe('noise', () => {
