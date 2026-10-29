@@ -47,6 +47,10 @@ export interface House {
   holdShut(doorId: DoorId, shut: boolean): boolean;
   pinCells(cells: readonly CellId[]): void;
   shiftCorridorBehind(): ChunkDiff;
+  /** Spec 22: at dawn the wall raised behind the Act 1 corridor comes down again. */
+  reopenAct1Corridor(): ChunkDiff;
+  /** Spec 22: the rooms stop moving; reshuffles change nothing from now on. */
+  freeze(): void;
   endAct1(): void;
   /** Spec 21: with `lockedBy`, its doors are locked until opened with that key (the exit key). */
   revealDiningRoom(visible: ReadonlySet<CellId>, playerCell: CellId, facing: Dir, lockedBy?: string): ChunkDiff;
@@ -140,6 +144,7 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
   let diningKey: string | undefined;
   let diningSlot: [number, number] | undefined;
   let reshuffles = 0;
+  let frozenForGood = false;
   const keyRooms = lockPlan(root.fork('locks'), caseFile);
   const byCharacter = new Map(keyRooms.map((k) => [k.characterId, k]));
 
@@ -458,6 +463,7 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
     },
 
     reshuffle(visible, playerCell) {
+      if (frozenForGood) return { loaded: [], unloaded: [] };
       const rng = root.fork(`reshuffle:${reshuffles++}`);
       const guarded = protectedSlots(visible, playerCell);
       const frozen = new Set<number>([pack(0, 0)]);
@@ -535,6 +541,17 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
       layouts.delete(pack(0, 0));
       markDirty(0, 0);
       return refreshLoaded();
+    },
+
+    reopenAct1Corridor() {
+      removedEdges.delete(ACT1_BACK_EDGE);
+      layouts.delete(pack(0, 0));
+      markDirty(0, 0);
+      return refreshLoaded();
+    },
+
+    freeze() {
+      frozenForGood = true;
     },
 
     endAct1() {

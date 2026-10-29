@@ -70,4 +70,4 @@ Vitest: monologue rules. Playwright: a thought on screen, none during an encount
 - A thought already on screen is cleared at once when an encounter, the journal, a dialogue, the finale or an ending takes the screen (the test caught one lingering into an encounter).
 - The thought sits 24% from the bottom, above the E prompt; La Sombra's caption moved up to 32%.
 - Proof: `tests/unit/monologue.test.ts` (7 tests); `tests/e2e/thoughts.spec.ts`: at the dead end "There must be a candle somewhere here.", then by the stand "A candle, and matches. Might come in handy." (`artifacts/screenshots/20-thought.png`); no thought visible or logged while an encounter ran, and afterwards "Its candle lit by itself…".
-- Not done (Should): the test that every line is wired waits for spec 22, whose dawn thought has no trigger yet; every other line is wired to its event in `src/story/thoughts.ts`.
+- Not done (Should): a unit test that every line is wired. Since spec 22, every line in the table is wired to its event in `src/story/thoughts.ts` (the dawn thought by `Dawn`), but no test checks that.

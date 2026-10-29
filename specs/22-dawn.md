@@ -1,5 +1,5 @@
 # 22: Dawn
-Status: Approved
+Status: Done
 Depends on: 03, 14, 21
 
 ## Goal
@@ -20,10 +20,10 @@ A player who survives until dawn without escaping faces the patriarch's last que
 ## Interfaces
 ```ts
 dawnOutcome(accusedId: CharacterId, killerId: CharacterId): 'free' | 'trapped'
-pathHome(house: House, from: CellId): CellId[]           // the cells to strew petals on, ending at the front door
+pathHome(house: House, from: CellId): CellId[]           // the cells to strew petals on, ending at the hall's cell inside the front door ('7,0'); [] if none
 house.freeze(): void                                      // no more reshuffles
-house.reopenAct1Corridor(): void                          // takes down the wall from shiftCorridorBehind
-events: dawn, dawnAnswered { accusedId, correct }
+house.reopenAct1Corridor(): ChunkDiff                     // takes down the wall from shiftCorridorBehind
+events: dawn (spec 14's clock), dawnAnswered { accusedId, correct }
 ```
 
 ## Out of scope
@@ -31,11 +31,11 @@ The clock itself and the ending screens (14), naming the killer before dawn (21)
 
 ## Acceptance checks
 Must:
-- [ ] Unit: `dawnOutcome` for the right and a wrong name.
-- [ ] Property test over 200 seeds with 50 reshuffles each: once the Act 1 wall is down, `pathHome` reaches the front door from any loaded cell.
-- [ ] Unit: after `freeze()`, lightning no longer reshuffles the house.
-- [ ] Playwright (`?seed=42&skip=act1&clock=05:59`): dawn, the right name, the petals along the way, the front door opens and the ending shows (screenshots).
-- [ ] Playwright: dawn and a wrong name give the trapped ending (screenshot).
+- [x] Unit: `dawnOutcome` for the right and a wrong name.
+- [x] Property test over 200 seeds with 50 reshuffles each: once the Act 1 wall is down, `pathHome` reaches the front door from any loaded cell.
+- [x] Unit: after `freeze()`, lightning no longer reshuffles the house.
+- [x] Playwright (`?seed=42&skip=act1&clock=05:59`): dawn, the right name, the petals along the way, the front door opens and the ending shows (screenshots).
+- [x] Playwright: dawn and a wrong name give the trapped ending (screenshot).
 
 ## Test plan
 Vitest: outcome, path home, freeze. Playwright with the mock LLM: both answers at dawn.
@@ -43,3 +43,9 @@ Vitest: outcome, path home, freeze. Playwright with the mock LLM: both answers a
 ## Decisions
 - Supersedes spec 14's rule that dawn always gives the trapped ending.
 - Marigold petals are no longer a refuge (spec 12); at dawn they mark the way home.
+- The patriarch's question waits for any encounter, dialogue or the journal to close. A player who already named the killer to a spirit (21) but hasn't left is simply set free at dawn.
+- The grey dawn light is the house's ambient light rising over 3 s, rather than light through each window: simpler, and it reads the same.
+- The way home is A* through the doors (`house.pathBetween`); the house is frozen at dawn, so the petals stay true.
+- Proof: `tests/unit/dawn.test.ts` (the outcome; 200 seeds × 50 reshuffles, five starting cells each, every path reaching the front door through doors that open; nothing moves once frozen) and `tests/e2e/dawn.spec.ts`: at 6:00 the patriarch asked, the right name freed the player, the back door to the portrait hall was there again, the front door unsealed, petals lay along the way home (`artifacts/screenshots/22-petals.png`), and opening the front door gave the ending matching `toldTheTruth` (`22-free.png`); a wrong name gave the trapped ending (`22-trapped.png`).
+- Scares stop for good at dawn as well as La Sombra and the hazards; thoughts carry on.
+- Under heavy load on the test machine (load average about 12), a few thought and story checks timed out in a full parallel run; with two workers all 77 browser tests pass.
