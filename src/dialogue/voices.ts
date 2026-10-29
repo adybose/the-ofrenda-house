@@ -7,13 +7,19 @@ export interface VoiceModel {
   gender: Gender;
   /** Its folder in the rhasspy `piper-voices` collection. */
   path: string;
+  /**
+   * How much to slow it to an even pace: the voices speak at very different natural speeds. Measured on
+   * one 29-word passage: how much longer it gets per unit of length scale (lessac 4.56 s, jenny 5.18,
+   * ryan 3.91, alan 7.14; the rest, about 2.7 s, doesn't stretch), relative to lessac.
+   */
+  tempo: number;
 }
 
 export const VOICES: readonly VoiceModel[] = [
-  { id: 'en_US-lessac-medium', gender: 'female', path: 'en/en_US/lessac/medium' },
-  { id: 'en_GB-jenny_dioco-medium', gender: 'female', path: 'en/en_GB/jenny_dioco/medium' },
-  { id: 'en_US-ryan-medium', gender: 'male', path: 'en/en_US/ryan/medium' },
-  { id: 'en_GB-alan-medium', gender: 'male', path: 'en/en_GB/alan/medium' },
+  { id: 'en_US-lessac-medium', gender: 'female', path: 'en/en_US/lessac/medium', tempo: 1 },
+  { id: 'en_GB-jenny_dioco-medium', gender: 'female', path: 'en/en_GB/jenny_dioco/medium', tempo: 0.88 },
+  { id: 'en_US-ryan-medium', gender: 'male', path: 'en/en_US/ryan/medium', tempo: 1.17 },
+  { id: 'en_GB-alan-medium', gender: 'male', path: 'en/en_GB/alan/medium', tempo: 0.64 },
 ];
 
 /**
@@ -31,21 +37,23 @@ export interface VoiceSpec {
 }
 
 /** La Sombra: the deepest voice pitched far down, slow and flat, through its dark doubled chain. */
-export const SHADOW_VOICE: VoiceSpec = { voiceId: 'en_US-ryan-medium', pitch: 0.7, rate: 1.5, expression: 0.7, shadow: true };
+export const SHADOW_VOICE: VoiceSpec = { voiceId: 'en_US-ryan-medium', pitch: 0.75, rate: 1.68, expression: 0.45, shadow: true };
 
 type Age = 'patriarch' | 'old' | 'middle' | 'young';
 
 const AGE: Partial<Record<Role, Age>> = { patriarch: 'patriarch', grandmother: 'old', eldestChild: 'young' };
 
 /**
- * Everyone speaks slowly; the old lower, slower and calmer, the young higher, quicker and livelier.
- * The patriarch is deepest of all.
+ * Everyone speaks slowly, flat and serious: an expression (Piper's noise scale) well under its default
+ * of 0.667, so pitch barely wanders from word to word. The old are lower, slower and calmest, the young
+ * higher and quicker. The patriarch is the deepest and slowest of all, and keeps a fuller inflection.
+ * (The paces allow for the steady rhythm Piper is run with, which on its own speaks about 10% faster.)
  */
 const BASE: Record<Age, { pitch: number; rate: number; expression: number }> = {
-  patriarch: { pitch: 0.84, rate: 1.4, expression: 0.76 },
-  old: { pitch: 0.92, rate: 1.4, expression: 0.76 },
-  middle: { pitch: 0.98, rate: 1.28, expression: 0.8 },
-  young: { pitch: 1.06, rate: 1.18, expression: 0.84 },
+  patriarch: { pitch: 0.84, rate: 1.8, expression: 0.76 },
+  old: { pitch: 0.92, rate: 1.57, expression: 0.42 },
+  middle: { pitch: 0.98, rate: 1.43, expression: 0.45 },
+  young: { pitch: 1.06, rate: 1.32, expression: 0.48 },
 };
 
 /** Women up and men down, so no woman sounds like a man (and no man like a woman). */
@@ -81,13 +89,18 @@ export function assignVoices(seed: Seed, characters: readonly Character[]): Part
     // point furthest (in steps of pitch plus steps of pace) from those already on it.
     const others = assigned.filter((v) => v.voiceId === voiceId);
     const expression = round(base.expression + rng.pick([-0.01, 0, 0.01]));
-    // The patriarch keeps to the low half of his range: the deepest voice in the house.
-    const pitchSteps = character.role === 'patriarch' ? STEPS.filter((p) => p <= 0) : STEPS;
-    const options = pitchSteps.flatMap((p) => STEPS.map((r) => ({ voiceId, pitch: round(base.pitch + p * PITCH_STEP), rate: round(base.rate + r * RATE_STEP), expression })));
+    // The patriarch keeps to the low half of his pitch range and the slow half of his pace: the
+    // deepest, slowest voice in the house.
+    const patriarch = character.role === 'patriarch';
+    const pitchSteps = patriarch ? STEPS.filter((p) => p <= 0) : STEPS;
+    const rateSteps = patriarch ? STEPS.filter((r) => r >= 0) : STEPS;
+    const options = pitchSteps.flatMap((p) => rateSteps.map((r) => ({ voiceId, pitch: round(base.pitch + p * PITCH_STEP), rate: round(base.rate + r * RATE_STEP), expression })));
     const distance = (v: VoiceSpec) => Math.min(...others.map((o) => Math.abs(o.pitch - v.pitch) / PITCH_STEP + Math.abs(o.rate - v.rate) / RATE_STEP));
     const lowest = Math.min(...options.map((v) => v.pitch));
     const highest = Math.max(...options.map((v) => v.pitch));
-    const corners = options.filter((v) => (v.pitch === lowest || v.pitch === highest) && [base.rate - 3 * RATE_STEP, base.rate + 3 * RATE_STEP].map(round).includes(v.rate));
+    const slowest = Math.max(...options.map((v) => v.rate));
+    const quickest = Math.min(...options.map((v) => v.rate));
+    const corners = options.filter((v) => (v.pitch === lowest || v.pitch === highest) && (v.rate === slowest || v.rate === quickest));
     const best = Math.max(...options.map(distance));
     const voice = rng.pick(others.length ? options.filter((v) => distance(v) === best) : corners);
     voices[character.id] = voice;
@@ -98,8 +111,10 @@ export function assignVoices(seed: Seed, characters: readonly Character[]): Part
 
 /**
  * The length scale to ask Piper for. The client shifts pitch by playback rate, which also speeds the
- * line up by `pitch`, so Piper speaks it `pitch` times slower to land on `rate`.
+ * line up by `pitch`, so Piper speaks it `pitch` times slower to land on `rate`; and each voice's
+ * `tempo` evens out how fast it naturally talks.
  */
 export function lengthScale(voice: VoiceSpec): number {
-  return Math.round(voice.rate * voice.pitch * 100) / 100;
+  const tempo = VOICES.find((v) => v.id === voice.voiceId)?.tempo ?? 1;
+  return Math.round(voice.rate * voice.pitch * tempo * 100) / 100;
 }

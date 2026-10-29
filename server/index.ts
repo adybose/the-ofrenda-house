@@ -50,7 +50,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     if (!text || text.length > 600 || !tts.knows(body.voiceId)) return reply.status(400).send({ error: 'text and a known voiceId required' });
     const rate = typeof body.rate === 'number' && body.rate >= 0.5 && body.rate <= 2 ? body.rate : 1;
-    const expression = typeof body.expression === 'number' && body.expression >= 0.6 && body.expression <= 0.9 ? body.expression : 0.8;
+    const expression = typeof body.expression === 'number' && body.expression >= 0.3 && body.expression <= 0.9 ? body.expression : 0.45;
     const wav = await tts.synthesize(text, body.voiceId, rate, expression);
     if (!wav) return reply.status(503).send({ error: 'speech unavailable' });
     return reply.type('audio/wav').send(wav);

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateCase } from '../../src/case/generate';
-import { VOICES, assignVoices } from '../../src/dialogue/voices';
+import { VOICES, assignVoices, lengthScale } from '../../src/dialogue/voices';
 import { buildServer } from '../../server/index';
 import type { TtsOptions } from '../../server/tts';
 import { startMockOllama, stepOf } from '../mocks/ollama';
@@ -107,7 +107,7 @@ describe('POST /api/tts', () => {
     expect(args).toContain(`-m ${join(dir, 'en_US-ryan-medium.onnx')}`);
     expect(args).toContain('--length-scale 1.15');
     expect(args).toContain('--noise-scale 0.82');
-    expect(args).toContain('--noise-w-scale 1');
+    expect(args).toContain('--noise-w-scale 0.6');
     expect(args).toMatch(/-d \S+/);
     expect(await readFile(join(dir, 'log.text'), 'utf8')).toContain('Who walks in my house?');
   });
@@ -181,14 +181,14 @@ describe('prefetching speech', () => {
     await s.tts.idle();
     for (const args of await log()) {
       expect(args).toContain(`${voice.voiceId}.onnx`);
-      expect(args).toContain(`--length-scale ${Math.round(voice.rate * voice.pitch * 100) / 100}`);
+      expect(args).toContain(`--length-scale ${lengthScale(voice)}`);
       expect(args).toContain(`--noise-scale ${voice.expression}`);
     }
     const spoken = await readFile(join(dir, 'log.text'), 'utf8');
     expect(spoken).toContain('Who walks in my house');
     expect(spoken).toContain('I keep the hours');
     // The client's later request for the same line is a cache hit.
-    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: Math.round(voice.rate * voice.pitch * 100) / 100, expression: voice.expression });
+    const response = await tts(s, { text: 'Who walks in my house on the night of the dead?', voiceId: voice.voiceId, rate: lengthScale(voice), expression: voice.expression });
     expect(response.statusCode).toBe(200);
     expect(await log()).toHaveLength(2);
   });

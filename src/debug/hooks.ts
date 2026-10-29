@@ -50,7 +50,8 @@ export interface OfrendaDebug {
   masterGain(): number;
   testVoice(seconds: number): void;
   /** A voice-like test WAV through the spirit or La Sombra ghost chain, offline (spec 09). */
-  renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; flatness: number; hasNaN: boolean }>;
+  /** `tail`: seconds of sound after the words end (echo); `centroid`: brightness in Hz (see `spectrum`). */
+  renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; flatness: number; centroid: number; tail: number; hasNaN: boolean }>;
   setTension(level: number): void;
   audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
   setOutdoors(on: boolean): void;
@@ -210,13 +211,17 @@ export function installDebugHooks(options: {
       const samples = await options.audio.renderVoiceOffline(testWav(), voice);
       let peak = 0;
       let sum = 0;
+      let last = 0;
       let hasNaN = false;
-      for (const v of samples) {
+      samples.forEach((v, i) => {
         if (Number.isNaN(v)) hasNaN = true;
         peak = Math.max(peak, Math.abs(v));
         sum += v * v;
-      }
-      return { peak, rms: Math.sqrt(sum / samples.length), flatness: spectrum(samples).flatness, hasNaN };
+        if (Math.abs(v) > 0.005) last = i;
+      });
+      // The words start at 0.01 s and last the test WAV's 1.5 s, stretched by the pitch shift.
+      const tail = last / 2 / 44_100 - 0.01 - TEST_WAV_SECONDS / voice.pitch;
+      return { peak, rms: Math.sqrt(sum / samples.length), ...spectrum(samples), tail, hasNaN };
     },
     setTension: (level) => options.audio.setTension(level),
     audioLevels: () => options.audio.levels(),
@@ -279,9 +284,11 @@ function spectrum(samples: Float32Array): { flatness: number; centroid: number }
  * A stand-in for a Piper line: 1.5 s of a 130 Hz voice-like buzz in syllables, normalised near full
  * scale as Piper's speech is, as a 16-bit mono 22,050 Hz WAV.
  */
+const TEST_WAV_SECONDS = 1.5;
+
 function testWav(): ArrayBuffer {
   const rate = 22_050;
-  const length = Math.round(rate * 1.5);
+  const length = Math.round(rate * TEST_WAV_SECONDS);
   const wav = new DataView(new ArrayBuffer(44 + length * 2));
   const text = (at: number, value: string) => [...value].forEach((c, i) => wav.setUint8(at + i, c.charCodeAt(0)));
   text(0, 'RIFF');

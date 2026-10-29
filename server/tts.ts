@@ -39,10 +39,10 @@ export interface Tts {
 }
 
 /** Bumped whenever the audio for the same request changes, so old cached WAVs aren't served. */
-const FORMAT = 2;
+const FORMAT = 3;
 
-/** Piper's variation in phoneme timing (rhythm), up from its default of 0.8 for a less even delivery. */
-const RHYTHM = 1;
+/** Piper's variation in phoneme timing, below its default of 0.8: an even, measured rhythm. */
+const RHYTHM = 0.6;
 
 /** pip's per-user script folders on a Mac (and Linux), where `piper` lands. */
 function pythonUserBins(): string[] {

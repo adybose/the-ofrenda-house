@@ -3,8 +3,9 @@ import type { Vec3 } from './engine';
 
 // A spirit's voice made ghostly (spec 09): pitched by playback rate, band-limited like a voice heard
 // through a wall, with an echo trailing behind it; the voice bus adds the room's reverb. La Sombra is
-// pitched far down and darker, its voice doubled by a second, slightly lower one just behind it, with a
-// long dark echo. No noise: an earlier breath layer sounded like radio static.
+// pitched far down and darker, its voice doubled by a second, slightly lower one just behind it, with
+// one short slap of echo, so every word is understood. No noise: an earlier breath layer sounded like
+// radio static, and a long echo smeared its words together.
 
 /** The whole chain's level: Piper normalises speech near full scale, and the echo adds to it. */
 const LEVEL = 0.6;
@@ -41,7 +42,7 @@ function spirit(ctx: BaseAudioContext, source: AudioNode, out: AudioNode): void 
 }
 
 /** La Sombra's double: the same words a shade lower and a beat behind, like two throats at once. */
-const DOUBLE = { pitch: 0.985, delay: 0.025, level: 0.7 };
+const DOUBLE = { pitch: 0.985, delay: 0.018, level: 0.4 };
 
 function shadow(ctx: BaseAudioContext, source: AudioNode, double: AudioNode, out: AudioNode): void {
   const dark = ctx.createGain();
@@ -51,12 +52,13 @@ function shadow(ctx: BaseAudioContext, source: AudioNode, double: AudioNode, out
   const doubleLevel = ctx.createGain();
   doubleLevel.gain.value = DOUBLE.level;
   double.connect(late).connect(doubleLevel).connect(dark);
-  const band = filter(ctx, 'lowpass', 2200);
+  // Open to 3.4 kHz, so the consonants that carry the words come through.
+  const band = filter(ctx, 'lowpass', 3400);
   dark.connect(filter(ctx, 'highpass', 80)).connect(band);
   const dry = ctx.createGain();
-  dry.gain.value = 0.55;
+  dry.gain.value = 0.65;
   band.connect(dry).connect(out);
-  delayLine(ctx, band, out, 0.38, 0.45, 1500, 0.45);
+  delayLine(ctx, band, out, 0.14, 0.15, 2000, 0.2);
 }
 
 /**

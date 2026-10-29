@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateCase } from '../../src/case/generate';
-import { SHADOW_VOICE, VOICES, assignVoices } from '../../src/dialogue/voices';
+import { SHADOW_VOICE, VOICES, assignVoices, lengthScale } from '../../src/dialogue/voices';
 
 const genderOf = (voiceId: string) => VOICES.find((v) => v.id === voiceId)!.gender;
 
@@ -30,11 +30,16 @@ describe('spirit voices', () => {
         else expect(voice.pitch, `${seed} ${c.id}`).toBeLessThanOrEqual(1.08);
         expect(voice.pitch).toBeGreaterThanOrEqual(0.72);
         expect(voice.pitch).toBeLessThanOrEqual(1.16);
-        // Slow: every length scale at least 1.09 (the first version went down to 0.91).
-        expect(voice.rate).toBeGreaterThanOrEqual(1.09);
-        expect(voice.rate).toBeLessThanOrEqual(1.5);
-        expect(voice.expression).toBeGreaterThanOrEqual(0.74);
-        expect(voice.expression).toBeLessThanOrEqual(0.86);
+        // Slow: every length scale at least 1.23 (the first version went down to 0.91).
+        expect(voice.rate).toBeGreaterThanOrEqual(1.23);
+        expect(voice.rate).toBeLessThanOrEqual(1.9);
+        // Flat and serious: little random wandering of pitch (Piper's default noise scale is 0.667).
+        // The patriarch keeps the fuller inflection the listening check liked.
+        if (c.role === 'patriarch') expect(voice.expression).toBeGreaterThanOrEqual(0.7);
+        else {
+          expect(voice.expression, `${seed} ${c.id}`).toBeGreaterThanOrEqual(0.4);
+          expect(voice.expression, `${seed} ${c.id}`).toBeLessThanOrEqual(0.5);
+        }
       }
     }
   });
@@ -78,19 +83,33 @@ describe('spirit voices', () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it('give the patriarch the deepest voice of the men in his run', () => {
+  it('give the patriarch the deepest voice of the men in his run, and the slowest of anyone', () => {
     for (let seed = 0; seed < 1000; seed++) {
       const { characters } = generateCase(seed);
       const voices = assignVoices(seed, characters);
       const patriarch = voices.patriarch!;
       expect(patriarch.pitch, `seed ${seed}`).toBeLessThanOrEqual(0.8);
+      expect(patriarch.rate, `seed ${seed}`).toBeGreaterThanOrEqual(1.8);
+      for (const c of characters) if (c.role !== 'patriarch') expect(voices[c.id]!.rate, `seed ${seed} ${c.id}`).toBeLessThan(patriarch.rate);
       for (const c of characters) if (c.gender === 'male' && c.role !== 'patriarch') expect(voices[c.id]!.pitch, `seed ${seed} ${c.id}`).toBeGreaterThan(patriarch.pitch);
     }
   });
 
-  it('give La Sombra a deep, slow, whispered voice of its own', () => {
+  it('give La Sombra a deep, slow, flat voice of its own', () => {
     expect(SHADOW_VOICE.shadow).toBe(true);
     expect(SHADOW_VOICE.pitch).toBeLessThan(0.8);
+    expect(SHADOW_VOICE.expression).toBeLessThanOrEqual(0.5);
     expect(VOICES.map((v) => v.id)).toContain(SHADOW_VOICE.voiceId);
+  });
+
+  it('even out the voices natural speeds, so a pace means the same on every voice', () => {
+    // Measured: per unit of length scale, a passage grows 3.91 s in ryan's voice and 7.14 s in alan's.
+    const tempo = Object.fromEntries(VOICES.map((v) => [v.id, v.tempo]));
+    expect(tempo['en_US-ryan-medium']).toBeGreaterThan(1);
+    expect(tempo['en_GB-alan-medium']).toBeLessThan(1);
+    const pace = { pitch: 1, rate: 1.4, expression: 0.45 };
+    const ryan = lengthScale({ ...pace, voiceId: 'en_US-ryan-medium' });
+    const alan = lengthScale({ ...pace, voiceId: 'en_GB-alan-medium' });
+    expect(ryan / alan).toBeCloseTo(7.14 / 3.91, 1);
   });
 });
