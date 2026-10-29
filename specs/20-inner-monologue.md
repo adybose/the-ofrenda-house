@@ -1,5 +1,5 @@
 # 20: Inner monologue
-Status: Approved
+Status: Done
 Depends on: 10, 17, 18
 
 ## Goal
@@ -40,8 +40,8 @@ The stranger thinks aloud in short lines on screen about what they have understo
 ## Interfaces
 ```ts
 // src/story/monologue.ts (pure)
-THOUGHTS: readonly Thought[]          // { id, trigger, when?, line, repeatEverySeconds?, followUp? }
-monologueReducer(state, event, now): { state; show?: string }
+THOUGHTS: readonly Thought[]          // { id, on: trigger, when?(ctx, vars), line, repeatEvery?, followUp?: { id, after, unless(ctx) } }
+monologueReducer(state, event): state  // events: trigger { trigger, ctx, now, vars? } | think { id, now } | tick { ctx, now, blocked }; state.show: { id, text } when a thought is due
 // src/ui/thought.ts
 monologue.think(id: string): void
 events: thoughtShown { id }
@@ -52,11 +52,22 @@ Voicing the thoughts; the events themselves (owned by 12, 14, 17, 18, 21, 22).
 
 ## Acceptance checks
 Must:
-- [ ] Unit: a thought shows once; a repeatable one waits for its cooldown; a condition stops it; a follow-up shows only if the player hasn't acted.
-- [ ] Unit: thoughts queue and wait while an encounter or the journal is open.
-- [ ] Playwright (`?seed=42&skip=act1`): picking up the candle shows its thought (screenshot), and no thought shows during an encounter.
+- [x] Unit: a thought shows once; a repeatable one waits for its cooldown; a condition stops it; a follow-up shows only if the player hasn't acted.
+- [x] Unit: thoughts queue and wait while an encounter or the journal is open.
+- [x] Playwright (`?seed=42&skip=act1`): standing by the candle and matchbox shows its thought (screenshot), and no thought shows during an encounter.
 Should:
 - [ ] Every line in the table is wired once its trigger's spec is built (checked by a unit test over `THOUGHTS`).
 
 ## Test plan
 Vitest: monologue rules. Playwright: a thought on screen, none during an encounter.
+
+## Decisions
+- The rules see a small context each frame (`MonologueContext`: battery, matches, candles held, whether the player is by the matchbox, whether they are in light); thoughts with `on: 'tick'` are checked against it every frame, the rest fire on game events.
+- The check above changed from "picking up the candle" to "standing by the candle and matchbox": the table has no thought for picking the candle up; seeing it is the one that fires there.
+- A thought sits low and centred, below La Sombra's caption, and shows one at a time, 4.5 s apart.
+- `accused` gained `key` (the key the answer left, if any), so "Nothing… I'll have to last until dawn." fires when a wrong name leaves none.
+- Until spec 14 scripts Act 1, `?skip=act1` (which starts at the dead end) thinks "There must be a candle somewhere here." at the start.
+- A thought already on screen is cleared at once when an encounter, the journal, a dialogue, the finale or an ending takes the screen (the test caught one lingering into an encounter).
+- The thought sits 24% from the bottom, above the E prompt; La Sombra's caption moved up to 32%.
+- Proof: `tests/unit/monologue.test.ts` (7 tests); `tests/e2e/thoughts.spec.ts`: at the dead end "There must be a candle somewhere here.", then by the stand "A candle, and matches. Might come in handy." (`artifacts/screenshots/20-thought.png`); no thought visible or logged while an encounter ran, and afterwards "Its candle lit by itself…".
+- Not done (Should): the test that every line is wired waits for spec 22, whose dawn thought has no trigger yet; every other line is wired to its event in `src/story/thoughts.ts`.
