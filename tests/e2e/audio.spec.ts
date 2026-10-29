@@ -4,7 +4,7 @@ test('every named sound renders offline: not silent, no NaN, peak at or below 1.
   await page.goto('/?seed=42&debug=hooks&mute=1');
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
   const names = await page.evaluate(() => window.__ofrenda!.soundNames());
-  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'heartbeat']) {
+  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'clockTick', 'splat', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'heartbeat']) {
     expect(names).toContain(sound);
   }
   for (const name of names) {
@@ -42,4 +42,32 @@ test('?mute=1 keeps the master gain at 0', async ({ page }) => {
   await page.mouse.click(400, 300);
   await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioState())).toBe('running');
   expect(await page.evaluate(() => window.__ofrenda!.masterGain())).toBe(0);
+});
+
+test('the storm is quieter inside than out, and so is the thunder', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  await page.mouse.click(400, 300);
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioState())).toBe('running');
+  // The game starts outside (spec 16): the storm at full strength.
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioLevels().storm)).toBeGreaterThan(0.9);
+  const outside = await page.evaluate(() => window.__ofrenda!.audioLevels());
+  await page.evaluate(() => window.__ofrenda!.setOutdoors(false));
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioLevels().storm), { timeout: 5000 }).toBeLessThan(outside.storm / 2);
+  const inside = await page.evaluate(() => window.__ofrenda!.audioLevels());
+  expect(inside.thunder).toBeLessThan(outside.thunder);
+  expect(inside.thunder).toBeGreaterThan(0.4);
+});
+
+test('the grandfather clock ticks while the player is in its room, and stops outside it', async ({ page }) => {
+  await page.goto('/?seed=42&debug=hooks&mute=1&skip=prologue');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
+  await page.mouse.click(400, 300);
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioState())).toBe('running');
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.ticking())).toBe(true);
+  // Into the portrait hall, through the archway.
+  await page.evaluate(() => window.__ofrenda!.place(11.25, -12, 0));
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.ticking())).toBe(false);
+  await page.evaluate(() => window.__ofrenda!.place(11.25, -3, 0));
+  await expect.poll(() => page.evaluate(() => window.__ofrenda!.ticking())).toBe(true);
 });

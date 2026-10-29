@@ -42,12 +42,16 @@ export interface OfrendaDebug {
   lightningInfo(): { window: unknown; position: number[]; target: number[]; visible: boolean; intensity: number };
   soundNames(): SoundName[];
   /** Renders a sound offline and summarises it (spec 07's check). */
-  renderSound(name: SoundName): Promise<{ peak: number; rms: number; hasNaN: boolean; seconds: number }>;
+  renderSound(name: SoundName, param?: number): Promise<{ peak: number; rms: number; hasNaN: boolean; seconds: number }>;
   audioState(): string;
   ambienceGain(): number;
   masterGain(): number;
   testVoice(seconds: number): void;
   setTension(level: number): void;
+  audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
+  setOutdoors(on: boolean): void;
+  /** Whether a grandfather clock is ticking near the player. */
+  ticking(): boolean;
   /** Where the player is in the arrival (spec 16), and whether the outside still exists. */
   arrival(): { stage: string; exterior: boolean };
   /** Moves to a room of the given kind and frames it for a screenshot. */
@@ -159,10 +163,10 @@ export function installDebugHooks(options: {
     strike: (strikeOptions) => void options.lightning.strike(strikeOptions),
     holdLightning: (level) => options.lightning.hold(level, { yaw: 0.2 }),
     soundNames: () => [...SOUND_NAMES],
-    async renderSound(name) {
-      // Long enough for each sound's tail; thunder close, the clock striking three.
-      const seconds = name === 'thunder' ? 7 : name === 'clock' ? 8 : 3;
-      const param = name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0;
+    async renderSound(name, chosen) {
+      // Long enough for each sound's tail; by default thunder close, the clock striking three.
+      const seconds = name === 'thunder' ? 9 : name === 'clock' ? 8 : 3;
+      const param = chosen ?? (name === 'thunder' ? 0.9 : name === 'clock' ? 3 : 0);
       const samples = await options.audio.renderOffline(name, seconds, param);
       let peak = 0;
       let sum = 0;
@@ -179,6 +183,9 @@ export function installDebugHooks(options: {
     masterGain: () => options.audio.levels().master,
     testVoice: (seconds) => options.audio.testVoice(seconds),
     setTension: (level) => options.audio.setTension(level),
+    audioLevels: () => options.audio.levels(),
+    setOutdoors: (on) => options.audio.setOutdoors(on),
+    ticking: () => options.audio.ticking,
     arrival: () => options.arrival(),
     lightningInfo: () => {
       const light = options.lightning.light;

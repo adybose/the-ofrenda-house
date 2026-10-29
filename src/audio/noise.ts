@@ -37,27 +37,42 @@ export function brownNoise(rng: Rng, length: number): Float32Array {
 }
 
 /**
+ * The lengths of the two raindrop loops, close to the golden ratio apart, so the pair never lines up
+ * on a short cycle: no beat.
+ */
+export const RAIN_LOOP_SECONDS = [7.3, 11.8] as const;
+
+/**
  * Raindrops as a loop: dense, unpitched impacts. Each is a few milliseconds of white noise with
- * a sharp decay and its own brightness (a one-pole low-pass), plus the occasional heavier splat.
- * No sines anywhere, so nothing rings like a chime.
+ * a sharp decay and its own brightness (a one-pole low-pass). The density drifts in gusts and
+ * lulls along a curve that comes back to where it started, so the loop has no seam. No sines,
+ * so nothing rings like a chime; no heavy splats, so nothing marks the loop's repeat (the engine
+ * scatters those at random).
  */
 export function rainGrains(rng: Rng, sampleRate: number, seconds: number): Float32Array {
   const length = Math.floor(sampleRate * seconds);
   const out = new Float32Array(length);
-  const drops = Math.floor(190 * seconds);
-  for (let d = 0; d < drops; d++) {
-    const splat = rng.chance(0.04);
+  // Gusts: a few slow waves with whole numbers of cycles per loop, at random phases.
+  const waves = [1, 2, 3].map((cycles) => ({ cycles, phase: rng.float() * Math.PI * 2, depth: 0.45 / cycles }));
+  const density = (t: number) => 1 + waves.reduce((sum, w) => sum + w.depth * Math.sin((2 * Math.PI * w.cycles * t) / seconds + w.phase), 0);
+  const peak = 1 + waves.reduce((sum, w) => sum + w.depth, 0);
+  const meanRate = 260;
+  const candidates = Math.floor(meanRate * seconds * peak);
+  for (let d = 0; d < candidates; d++) {
     const start = rng.int(0, length - 1);
-    const decay = splat ? 0.008 + rng.float() * 0.01 : 0.001 + rng.float() * 0.005;
-    const amplitude = splat ? 0.35 + rng.float() * 0.3 : 0.05 + rng.float() * 0.25;
-    // 0 = bright tick on glass, near 1 = dull thud on wood and earth.
-    const dullness = splat ? 0.6 + rng.float() * 0.3 : rng.float() * 0.75;
-    const end = Math.min(length, start + Math.floor(sampleRate * decay * 6));
+    // Thin the drops where the curve dips: lulls between gusts.
+    if (rng.float() * peak > density(start / sampleRate)) continue;
+    const decay = 0.001 + rng.float() * 0.005;
+    const amplitude = 0.05 + rng.float() * 0.25;
+    const dullness = rng.float() * 0.75;
+    const end = start + Math.floor(sampleRate * decay * 6);
     let smooth = 0;
     for (let i = start; i < end; i++) {
       const t = (i - start) / sampleRate;
       smooth = smooth * dullness + (rng.float() * 2 - 1) * (1 - dullness);
-      out[i] = out[i]! + amplitude * Math.exp(-t / decay) * smooth * (1 + dullness * 2);
+      // Drops that run past the end wrap round to the start: the loop is seamless.
+      const at = i % length;
+      out[at] = out[at]! + amplitude * Math.exp(-t / decay) * smooth * (1 + dullness * 2);
     }
   }
   for (let i = 0; i < length; i++) out[i] = Math.max(-1, Math.min(1, out[i]!));

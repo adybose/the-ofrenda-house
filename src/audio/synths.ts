@@ -1,5 +1,5 @@
 import { createRng, type Rng } from '../core/rng';
-import { brownNoise, pinkNoise, rainGrains, whiteNoise } from './noise';
+import { RAIN_LOOP_SECONDS, brownNoise, pinkNoise, rainGrains, whiteNoise } from './noise';
 
 // Every sound in the game, synthesised from oscillators, noise and filters. Each synth builds
 // its nodes on any context (live or offline), connects them to `out`, starts at `t`, and returns
@@ -105,18 +105,48 @@ function tone(s: SynthContext, at: number, from: number, to: number, peak: numbe
   return osc;
 }
 
-const grainCache = new WeakMap<BaseAudioContext, AudioBuffer>();
+const grainCache = new WeakMap<BaseAudioContext, AudioBuffer[]>();
 
-/** An 8 s loop of raindrop impacts (see `rainGrains`): unpitched, so nothing rings like a chime. */
-function grains(ctx: BaseAudioContext): AudioBuffer {
-  let buffer = grainCache.get(ctx);
-  if (!buffer) {
-    const data = rainGrains(createRng(21), ctx.sampleRate, 8);
-    buffer = ctx.createBuffer(1, data.length, ctx.sampleRate);
-    buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
-    grainCache.set(ctx, buffer);
+/** The raindrop loops (see `rainGrains`): two lengths, so their repeats never line up. */
+function grains(ctx: BaseAudioContext, index: 0 | 1): AudioBuffer {
+  let buffers = grainCache.get(ctx);
+  if (!buffers) {
+    buffers = RAIN_LOOP_SECONDS.map((seconds, i) => {
+      const data = rainGrains(createRng(21 + i), ctx.sampleRate, seconds);
+      const buffer = ctx.createBuffer(1, data.length, ctx.sampleRate);
+      buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
+      return buffer;
+    });
+    grainCache.set(ctx, buffers);
   }
-  return buffer;
+  return buffers[index]!;
+}
+
+/** A context whose output passes through an overall level: tune a whole sound with one number. */
+function withLevel(s: SynthContext, level: number): SynthContext {
+  const out = gain(s, level);
+  out.connect(s.out);
+  return { ...s, out };
+}
+
+/** Noise through a band-pass whose centre slides: scrapes, keys going in, bolts drawing back. */
+function sweep(s: SynthContext, at: number, duration: number, colour: NoiseColour, from: number, to: number, q: number, peak: number): void {
+  const source = noise(s, colour);
+  const band = filter(s, 'bandpass', from, q);
+  band.frequency.setValueAtTime(from, at);
+  band.frequency.exponentialRampToValueAtTime(to, at + duration);
+  const g = gain(s);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(peak, at + duration * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+  chain(source, band, g, s.out);
+  startNoise(source, s, at, duration + 0.05);
+}
+
+/** A knock on wood: a short thud with a hollow body resonance. */
+function knock(s: SynthContext, at: number, body: number, peak: number): void {
+  burst(s, at, 'brown', 'lowpass', 380, peak, 0.09);
+  burst(s, at, 'pink', 'bandpass', body, peak * 0.6, 0.06, 4);
 }
 
 /** A very slow oscillator scaled to `depth`, added onto a parameter: endless, unrepeating drift. */
@@ -151,14 +181,27 @@ export function rain(s: SynthContext): number {
   chain(body, low, bodyGain, s.out);
   startNoise(body, s, s.t, s.seconds);
 
-  const drops = s.ctx.createBufferSource();
-  drops.buffer = grains(s.ctx);
-  drops.loop = true;
-  const dropsGain = gain(s, 0.55);
-  chain(drops, dropsGain, s.out);
-  drops.start(s.t, s.rng.float() * 7);
-  drops.stop(until);
+  // Two drop loops of different lengths at slightly different speeds: they drift against each
+  // other and never settle into a rhythm.
+  for (const [index, rate] of [[0, 0.97], [1, 1.04]] as const) {
+    const drops = s.ctx.createBufferSource();
+    drops.buffer = grains(s.ctx, index);
+    drops.loop = true;
+    drops.playbackRate.value = rate;
+    const dropsGain = gain(s, 0.4);
+    chain(drops, dropsGain, s.out);
+    drops.start(s.t, s.rng.float() * RAIN_LOOP_SECONDS[index]);
+    drops.stop(until);
+  }
   return s.seconds;
+}
+
+/** One heavy drop off the eaves or a leaf: the engine scatters these at random over the rain. */
+export function splat(input: SynthContext): number {
+  const s = withLevel(input, 2.5);
+  burst(s, s.t, 'pink', 'bandpass', 1500 + s.rng.float() * 900, 0.45, 0.014, 1);
+  burst(s, s.t, 'brown', 'lowpass', 900, 0.25, 0.03);
+  return 0.1;
 }
 
 export function wind(s: SynthContext): number {
@@ -177,16 +220,22 @@ export function wind(s: SynthContext): number {
 }
 
 /** Thunder: param is closeness, 0 (far, a low grumble) to 1 (overhead, a sharp crack). */
+/** Thunder's overall level: one knob, set from measured peaks (close strikes peak near 0.9). */
+const THUNDER_LEVEL = 1.75;
+
 export function thunder(s: SynthContext): number {
   const close = Math.min(1, Math.max(0, s.param || 0.6));
-  const length = 4 + (1 - close) * 4;
-  if (close > 0.35) burst(s, s.t, 'white', 'highpass', 1200, 0.25 * close, 0.25 + close * 0.2);
+  const length = 4.5 + (1 - close) * 4;
+  const out = gain(s, THUNDER_LEVEL);
+  out.connect(s.out);
+  const inner: SynthContext = { ...s, out };
+  if (close > 0.35) burst(inner, s.t, 'white', 'highpass', 1200, 0.25 * close, 0.25 + close * 0.2);
   // The boom you feel more than hear.
-  tone(s, s.t + 0.05 + (1 - close) * 0.3, 42, 24, 0.3 + 0.15 * close, 0.06, 2.5);
+  tone(inner, s.t + 0.05 + (1 - close) * 0.3, 42, 24, 0.3 + 0.15 * close, 0.06, 2.8);
   const rumble = noise(s, 'brown', true);
   const low = filter(s, 'lowpass', 140 + close * 360, 0.9);
   const g = gain(s, 0.0001);
-  chain(rumble, low, g, s.out);
+  chain(rumble, low, g, out);
   startNoise(rumble, s, s.t, length);
   g.gain.setValueAtTime(0.0001, s.t);
   g.gain.exponentialRampToValueAtTime(0.42, s.t + 0.08 + (1 - close) * 0.5);
@@ -202,57 +251,87 @@ export function thunder(s: SynthContext): number {
 
 // ---- Doors and keys ----
 
+/** Overall levels for the door sounds, set from measured peaks. */
+const CREAK_LEVEL = 2.4;
+
+/**
+ * A dry hinge as the door swings: a shrill squeal that starts high and sinks and fades as the
+ * door opens, with the stick-slip judder of wood on iron.
+ */
 export function creak(s: SynthContext): number {
-  const length = 0.9 + s.rng.float() * 0.6;
-  // Stick-slip: a slow, wavering sawtooth through a narrow resonance, like a dry hinge.
-  const saw = s.ctx.createOscillator();
-  saw.type = 'sawtooth';
-  const steps = 24;
-  const rate = new Float32Array(steps);
-  for (let i = 0; i < steps; i++) rate[i] = 18 + s.rng.float() * 30 + (i / steps) * 15;
-  saw.frequency.setValueCurveAtTime(rate, s.t, length);
-  const band = filter(s, 'bandpass', 650, 14);
-  band.frequency.setValueAtTime(600 + s.rng.float() * 200, s.t);
-  band.frequency.linearRampToValueAtTime(1000 + s.rng.float() * 400, s.t + length);
-  const g = gain(s);
-  g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(3.2, s.t + 0.08);
-  g.gain.setValueAtTime(3.2, s.t + length - 0.2);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  chain(saw, band, g, s.out);
-  saw.start(s.t);
-  saw.stop(s.t + length + 0.05);
+  const length = 1.1 + s.rng.float() * 0.4;
+  const squeal = s.ctx.createOscillator();
+  squeal.type = 'sawtooth';
+  const steps = 64;
+  const start = 650 + s.rng.float() * 120;
+  const end = 280 + s.rng.float() * 60;
+  const pitch = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    pitch[i] = start * (end / start) ** t * (1 + (s.rng.float() - 0.5) * 0.12);
+  }
+  squeal.frequency.setValueCurveAtTime(pitch, s.t, length);
+  // Stick-slip: the sound stutters, fast at first, slower as the door gathers speed.
+  const judder = s.ctx.createOscillator();
+  judder.type = 'square';
+  judder.frequency.setValueAtTime(26, s.t);
+  judder.frequency.linearRampToValueAtTime(11, s.t + length);
+  const stutter = gain(s, 0.55);
+  const depth = gain(s, 0.45);
+  chain(judder, depth);
+  depth.connect(stutter.gain);
+  const thin = filter(s, 'highpass', 600);
+  const envelope = gain(s);
+  envelope.gain.setValueAtTime(0.0001, s.t);
+  envelope.gain.exponentialRampToValueAtTime(CREAK_LEVEL, s.t + 0.04);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
+  chain(squeal, thin);
+  for (const [from, to, q] of [[1700, 1100, 6], [3300, 2300, 8]] as const) {
+    const band = filter(s, 'bandpass', from, q);
+    band.frequency.setValueAtTime(from, s.t);
+    band.frequency.exponentialRampToValueAtTime(to, s.t + length);
+    chain(thin, band, stutter);
+  }
+  chain(stutter, envelope, s.out);
+  squeal.start(s.t);
+  judder.start(s.t);
+  squeal.stop(s.t + length + 0.05);
+  judder.stop(s.t + length + 0.05);
   return length;
 }
 
-export function slam(s: SynthContext): number {
-  tone(s, s.t, 75, 42, 0.55, 0.004, 0.45);
-  burst(s, s.t, 'brown', 'lowpass', 900, 0.4, 0.3);
+export function slam(input: SynthContext): number {
+  const s = withLevel(input, 1.4);
+  tone(s, s.t, 80, 40, 0.5, 0.004, 0.5);
+  burst(s, s.t, 'brown', 'lowpass', 900, 0.35, 0.32);
+  // The heavy wooden door itself.
+  burst(s, s.t, 'pink', 'bandpass', 180, 0.3, 0.2, 3);
   // The frame and hinges rattle a moment after.
-  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2500, 0.08, 0.03, 4);
+  for (let i = 0; i < 5; i++) burst(s, s.t + 0.04 + i * 0.03 + s.rng.float() * 0.02, 'white', 'bandpass', 2200, 0.08, 0.03, 3);
+  return 0.7;
+}
+
+/** Trying a locked door: the brass knob rattles, the latch catches, the door knocks in its frame. */
+export function lock(input: SynthContext): number {
+  const s = withLevel(input, 3.2);
+  for (let i = 0; i < 3; i++) burst(s, s.t + i * 0.06, 'white', 'bandpass', 1300 + s.rng.float() * 400, 0.22, 0.035, 1.5, 0.9 + s.rng.float() * 0.2);
+  burst(s, s.t + 0.18, 'pink', 'bandpass', 900, 0.3, 0.025, 3);
+  knock(s, s.t + 0.19, 220, 0.45);
+  knock(s, s.t + 0.33, 190, 0.35);
   return 0.6;
 }
 
-function metalClick(s: SynthContext, at: number, pitch: number, peak: number): void {
-  burst(s, at, 'white', 'bandpass', pitch * 1.3, peak, 0.02, 6);
-  tone(s, at, pitch, pitch * 0.98, peak * 0.4, 0.001, 0.07);
-}
-
-/** Trying a locked door: the latch catches and the handle rattles. */
-export function lock(s: SynthContext): number {
-  metalClick(s, s.t, 2800, 0.35);
-  metalClick(s, s.t + 0.11, 2300, 0.3);
-  for (let i = 0; i < 3; i++) metalClick(s, s.t + 0.25 + i * 0.07, 2000 + s.rng.float() * 600, 0.15);
-  return 0.6;
-}
-
-/** A key turning: two clicks and the bolt drawing back. */
-export function unlock(s: SynthContext): number {
-  metalClick(s, s.t, 2200, 0.3);
-  metalClick(s, s.t + 0.09, 3100, 0.3);
-  tone(s, s.t + 0.16, 210, 150, 0.35, 0.003, 0.12, 'triangle');
-  burst(s, s.t + 0.16, 'brown', 'lowpass', 600, 0.2, 0.1);
-  return 0.4;
+/** A key going in and turning: a scrape, two clicks with a wooden body, the bolt drawing back, a clunk. */
+export function unlock(input: SynthContext): number {
+  const s = withLevel(input, 2.6);
+  sweep(s, s.t, 0.18, 'white', 2600, 1200, 2, 0.12);
+  for (const at of [s.t + 0.25, s.t + 0.38]) {
+    burst(s, at, 'pink', 'bandpass', 1700 + s.rng.float() * 300, 0.3, 0.015, 2);
+    burst(s, at, 'pink', 'bandpass', 260, 0.25, 0.06, 4);
+  }
+  sweep(s, s.t + 0.42, 0.13, 'pink', 1100, 700, 1, 0.16);
+  knock(s, s.t + 0.56, 140, 0.45);
+  return 0.8;
 }
 
 // ---- Footsteps ----
@@ -266,11 +345,13 @@ export function footstepWood(s: SynthContext): number {
   return 0.3;
 }
 
-export function footstepTile(s: SynthContext): number {
+/** A heel on stone tile: a low-mid knock and a short gritty scuff (no bright click, which ticked). */
+export function footstepTile(input: SynthContext): number {
+  const s = withLevel(input, 2);
   const rate = 0.9 + s.rng.float() * 0.2;
-  burst(s, s.t, 'white', 'highpass', 1800, 0.3, 0.04, 0.7, rate);
-  burst(s, s.t, 'white', 'bandpass', 3200 * rate, 0.25, 0.05, 5);
-  tone(s, s.t, 160, 120, 0.2, 0.002, 0.05);
+  burst(s, s.t, 'pink', 'bandpass', 600 * rate, 0.45, 0.05, 1.2);
+  burst(s, s.t, 'brown', 'lowpass', 300, 0.3, 0.06);
+  burst(s, s.t + 0.02, 'white', 'highpass', 2500, 0.07, 0.07);
   return 0.2;
 }
 
@@ -434,6 +515,15 @@ export function cat(s: SynthContext): number {
   return length + 0.1;
 }
 
+/** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */
+export function clockTick(input: SynthContext): number {
+  const s = withLevel(input, 3.8);
+  const tock = s.param >= 0.5;
+  burst(s, s.t, 'white', 'bandpass', tock ? 1700 : 2400, 0.35, 0.012, 3);
+  burst(s, s.t, 'pink', 'bandpass', tock ? 650 : 900, 0.25, 0.04, 8);
+  return 0.15;
+}
+
 /** One lub-dub. param scales the strength (spec 12's tension). */
 export function heartbeat(s: SynthContext): number {
   const strength = Math.min(1, Math.max(0.1, s.param || 1));
@@ -447,6 +537,7 @@ export const SYNTHS = {
   rain,
   wind,
   thunder,
+  splat,
   creak,
   slam,
   lock,
@@ -457,6 +548,7 @@ export const SYNTHS = {
   footstepStone,
   flashlightClick,
   clock,
+  clockTick,
   stinger,
   whisper,
   bat,
