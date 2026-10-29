@@ -22,6 +22,8 @@ import { Arrival } from './story/arrival';
 import { Encounters } from './story/encounters';
 import { EXIT_KEY } from './story/accusation';
 import { Finale } from './story/finale';
+import { Monologue } from './story/thoughts';
+import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
 import { Hazards } from './spirits/hazards';
 import { ShadowController } from './spirits/shadow-controller';
@@ -249,9 +251,17 @@ async function startGame(): Promise<void> {
     onSpiritLeft: ({ characterId, outcome, keyIds }) => {
       if (outcome === 'reward') items.spiritSolved(characterId);
       items.layKeys(characterId, keyIds);
+      if (outcome === 'reward') monologue.solved();
     },
     allClues: url.searchParams.get('clues') === 'all',
   });
+
+  // The stranger's thoughts (spec 20). Until spec 14 scripts Act 1, `?skip=act1` starts where the
+  // patriarch leaves the player, with the first thought.
+  const monologue = new Monologue({ caseFile, house, items, flashlight, player, thoughts: createThoughts() });
+  if (skip === 'act1') monologue.think('findCandle');
+  let ended = false;
+  events.on('ending', () => (ended = true));
 
   // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it
   // plays the finale and the ending.
@@ -386,6 +396,7 @@ async function startGame(): Promise<void> {
       shadow.update(dt, time / 1000);
       hazards.update(dt, (shadow.mode === 'stalking' || shadow.mode === 'hunting') && !caught && !finale!.isActive() && !dialogue.isOpen() && !encounters.isActive(), shadow.threat);
       finale!.update(dt, time / 1000);
+      monologue.update(dt, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);

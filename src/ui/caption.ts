@@ -12,7 +12,7 @@ export function createCaption(): Caption {
   Object.assign(box.style, {
     position: 'fixed',
     left: '50%',
-    bottom: '22%',
+    bottom: '32%',
     transform: 'translateX(-50%)',
     maxWidth: '70%',
     textAlign: 'center',

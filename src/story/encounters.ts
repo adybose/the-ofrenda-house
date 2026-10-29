@@ -32,7 +32,7 @@ declare module '../core/events' {
     /** True while an encounter runs: the Shadow and the scares hold off (specs 12 and 13). */
     encounterActive: { active: boolean };
     /** Spec 21: the player named someone as the killer to a spirit. */
-    accused: { characterId: CharacterId; accusedId: CharacterId; correct: boolean };
+    accused: { characterId: CharacterId; accusedId: CharacterId; correct: boolean; key?: string };
     spiritLaughed: { characterId: CharacterId };
     exitKeyAwarded: Record<string, never>;
   }
@@ -291,11 +291,11 @@ export class Encounters {
       const accusedId = (await dialogue.choose(names)) as CharacterId;
       const correct = accusedId === caseFile.killerId;
       if (correct) this.killerNamed = true;
-      events.emit('accused', { characterId: character.id, accusedId, correct });
+      extraKey = accusationKey({ correct, locked: house.keyRooms(), given: this.given });
+      events.emit('accused', { characterId: character.id, accusedId, correct, key: extraKey });
       audio.play('laugh', { position: [spirit.position.x, 1.6, spirit.position.z], gain: 1.3 });
       events.emit('spiritLaughed', { characterId: character.id });
       await dialogue.say({ speaker: character.name, line: LAUGH_LINE });
-      extraKey = accusationKey({ correct, locked: house.keyRooms(), given: this.given });
     }
     this.dispatch({ type: 'ended' });
     dialogue.close();
