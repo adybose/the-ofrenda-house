@@ -1,3 +1,4 @@
+import { isCritical } from '../lighting/battery';
 import { el, useTheme } from './theme';
 
 /** The HUD's slots (spec 10): filled by specs 05 (prompt), 06 (battery), 12 (petals) and 14 (clock). */
@@ -37,7 +38,12 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
       const node = slot === 'battery' ? battery : slot === 'petals' ? petals : clock;
       node.style.display = value === undefined ? 'none' : 'block';
       if (value === undefined) return;
-      if (slot === 'battery') fill.style.width = `${Math.round(Math.max(0, Math.min(1, Number(value))) * 100)}%`;
+      if (slot === 'battery') {
+        const level = Math.max(0, Math.min(1, Number(value)));
+        fill.style.width = `${Math.round(level * 100)}%`;
+        // Red once critical (spec 17).
+        fill.style.background = isCritical(level) ? '#b03a2e' : '#d9b46c';
+      }
       else if (slot === 'petals') node.textContent = `Petals: ${value}`;
       else node.textContent = String(value);
     },

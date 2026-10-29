@@ -158,7 +158,7 @@ export class Encounters {
     const { camera, flashlight } = this.options;
     camera.getWorldDirection(this.forward);
     const to = new Vector3(spirit.position.x - camera.position.x, spirit.position.y + 1.2 - camera.position.y, spirit.position.z - camera.position.z);
-    const inBeam = flashlight.on && to.length() < BEAM.distance && this.forward.angleTo(to) < BEAM.angle;
+    const inBeam = flashlight.lit && to.length() < BEAM.distance && this.forward.angleTo(to) < BEAM.angle;
     spirit.setLit(spirit.lit + ((inBeam ? 1 : 0) - spirit.lit) * Math.min(1, dt * 4));
     spirit.update(time);
   }

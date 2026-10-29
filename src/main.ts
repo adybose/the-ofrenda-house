@@ -136,7 +136,9 @@ async function startGame(): Promise<void> {
   let exterior = layout ? createExteriorScene(scene, textures, layout, seed) : undefined;
   let flash = 0;
 
-  const flashlight = new Flashlight(scene, renderer);
+  // `?battery=0.08` starts the torch at 8% (debug).
+  const batteryParam = url.searchParams.get('battery');
+  const flashlight = new Flashlight(scene, renderer, { rng: createRng(seed).fork(STREAMS.lighting), level: batteryParam ? Number(batteryParam) : undefined });
   window.addEventListener('keydown', (event) => {
     if (event.code === 'KeyF' && !event.repeat) flashlight.toggle();
   });
