@@ -83,6 +83,15 @@ const inPortraitHall = (x: number, y: number) => x >= 5 && x <= 9 && y >= 5 && y
 const inCorridor = (x: number, y: number) => (x <= 4 && y === 12) || (x === 2 && y >= 2 && y <= 12) || (x <= 1 && y === 2);
 
 /**
+ * Where the corridor walls itself up behind the player: well down its long stretch, out of sight of
+ * the back door. Not sooner: walling up takes away the cell by the door (4,12), and a player still
+ * standing there would be left outside every room, stuck.
+ */
+export function wallsUpAt(x: number, y: number): boolean {
+  return x === 2 && y <= 10 && y >= 2;
+}
+
+/**
  * The story around the house (spec 14): the title and the prologue's captions, the scripted Act 1 in
  * the portrait hall and the corridor (shifting faces, the bat, the patriarch's chase and his words in
  * the dead end), and the clock from midnight to dawn.
@@ -182,7 +191,7 @@ export class StoryFlow {
     }
     if (this.current === 'chase') {
       this.follow(dt);
-      if (!this.shifted && inCorridor(x, y)) {
+      if (!this.shifted && wallsUpAt(x, y)) {
         this.shifted = true;
         // The way back walls itself up.
         this.options.applyDiff(this.options.house.shiftCorridorBehind());
@@ -224,7 +233,7 @@ export class StoryFlow {
     this.patriarch = spirit;
     this.options.captions.line.show(character.name, PATRIARCH_LINES.who, 5);
     void this.options.speaker.speak(PATRIARCH_LINES.who, this.voice, [bx, 1.7, bz]);
-    this.options.captions.hint.show('', 'Run! The arrow keys move you; hold Shift to run.', 6);
+    this.options.captions.hint.show('', 'Run! Through the door on your left, at the end of the hall. Arrow keys move you; hold Shift to run.', 8);
     this.enter('chase');
   }
 

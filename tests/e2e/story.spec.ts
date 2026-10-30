@@ -69,12 +69,37 @@ test('Act 1: the shifting faces, the bat, the patriarch’s chase, the dead end,
   await page.keyboard.up('ArrowUp');
   await page.keyboard.up('Shift');
 
-  // Into the corridor: the way back walls itself up.
-  await stand(page, [3, 12], Math.PI / 2);
-  await expect.poll(() => page.evaluate(() => window.__ofrenda!.house.getDoor('d:0,2:E')?.state ?? 'gone')).toBe('gone');
+  // Out through the back door on the left and down the corridor, walking (no teleports): the player
+  // must always stand in a room, and the way back walls itself up behind them.
+  const cell = () => page.evaluate(() => {
+    const p = window.__ofrenda!.player();
+    return `${Math.floor(p.x / 1.5)},${Math.floor(-p.z / 1.5)}`;
+  });
+  const inRoom = () => page.evaluate(() => {
+    const p = window.__ofrenda!.player();
+    return window.__ofrenda!.house.roomAt(`${Math.floor(p.x / 1.5)},${Math.floor(-p.z / 1.5)}`)?.id ?? null;
+  });
+  const visited: (string | null)[] = [];
+  await stand(page, [5, 12], Math.PI / 2);
+  await page.keyboard.down('ArrowUp');
+  for (let i = 0; i < 60 && (await cell()) !== '2,12'; i++) {
+    visited.push(await inRoom());
+    await page.waitForTimeout(100);
+  }
+  await page.keyboard.up('ArrowUp');
+  expect(await cell()).toBe('2,12');
+  // Turn down the corridor (from the middle of the corner, as a player walking on to the far wall would).
+  await stand(page, [2, 12], Math.PI);
+  await page.keyboard.down('ArrowUp');
+  for (let i = 0; i < 80 && !(await page.locator('#dialogue-text').textContent())?.includes('Another one'); i++) {
+    visited.push(await inRoom());
+    await page.waitForTimeout(100);
+  }
+  await page.keyboard.up('ArrowUp');
+  expect(visited).not.toContain(null);
+  expect(await page.evaluate(() => window.__ofrenda!.house.getDoor('d:0,2:E')?.state ?? 'gone')).toBe('gone');
 
   // The dead end: he speaks his piece, and the clock strikes midnight.
-  await stand(page, [2, 3], Math.PI);
   await expect(page.locator('#dialogue-text')).toContainText('Another one. The house took you, as it took the others.', { timeout: 8000 });
   await page.keyboard.press('Space');
   await page.waitForTimeout(80);
