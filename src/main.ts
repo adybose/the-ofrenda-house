@@ -299,7 +299,7 @@ async function startGame(): Promise<void> {
     dropChandelier: (x, z, cell) => {
       const group = view.chunk(chunkId(...chunkOfCell(cell)));
       if (group) hideChandelier(group, cell);
-      hazards?.dropChandelier(x, z);
+      hazards?.dropChandelier(x, z, cell);
     },
     forceDoorScare: doorScareParam === 'bats' || doorScareParam === 'batsChandelier' || doorScareParam === 'rats' ? doorScareParam : undefined,
     // A cat in the room beyond the door is startled instead (spec 24).
@@ -366,8 +366,23 @@ async function startGame(): Promise<void> {
     suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
     onTension: (level) => fear.hold(level),
     alwaysAmbush: url.searchParams.get('sombra') === 'door',
+    candleAmbush: url.searchParams.get('sombra') === 'candle',
   });
-  hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
+  hazards = new Hazards({
+    seed,
+    house,
+    doors,
+    flashlight,
+    audio,
+    player,
+    scene,
+    textures,
+    // La Sombra brings a room's chandelier down in front of the player (spec 25).
+    takeDownChandelier: (cell) => {
+      const group = view.chunk(chunkId(...chunkOfCell(cell)));
+      if (group) hideChandelier(group, cell);
+    },
+  });
   events.on('caughtByShadow', () => {
     caught = true;
     syncControls();

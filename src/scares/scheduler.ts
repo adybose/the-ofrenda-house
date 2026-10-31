@@ -1,6 +1,7 @@
 import { createRng, STREAMS } from '../core/rng';
 import { DIR_STEP } from '../world/grid';
 import type { Room } from '../world/types';
+import { DOOR_SCARE_COOLDOWN } from './door-scares';
 import { CELL_SIZE, ROOM_HEIGHT, WALL_INSET, cellCentre } from '../world/units';
 
 /**
@@ -65,6 +66,8 @@ export function placeTriggers(room: Room, seed: number): ScareTrigger[] {
 export interface ScareState {
   lastAt: number;
   lastHazardAt: number;
+  /** The last door scare (spec 25): they keep their own, shorter cooldown. */
+  lastDoorAt: number;
   /** A scare has already come in this visit to the current room. */
   firedThisVisit: boolean;
   used: ReadonlySet<string>;
@@ -74,11 +77,13 @@ export type ScareEvent =
   | { type: 'enterRoom'; roomId: string }
   | { type: 'hazard' }
   | { type: 'trip'; trigger: ScareTrigger; blocked: boolean }
+  /** Something behind a door the player opened (spec 24, 25). */
+  | { type: 'door'; trigger: ScareTrigger; blocked: boolean }
   /** A story script's scare (the Act 1 bat): it ignores the cooldown. */
   | { type: 'force'; trigger: ScareTrigger };
 
 export function createScareState(): ScareState {
-  return { lastAt: -Infinity, lastHazardAt: -Infinity, firedThisVisit: false, used: new Set() };
+  return { lastAt: -Infinity, lastHazardAt: -Infinity, lastDoorAt: -Infinity, firedThisVisit: false, used: new Set() };
 }
 
 export function scareScheduler(state: ScareState, event: ScareEvent, now: number): { state: ScareState; fire?: ScareTrigger } {
@@ -93,6 +98,12 @@ export function scareScheduler(state: ScareState, event: ScareEvent, now: number
       return { state: { ...state, lastHazardAt: now } };
     case 'force':
       return fired(event.trigger);
+    case 'door': {
+      const quiet = !event.blocked && now - state.lastDoorAt >= DOOR_SCARE_COOLDOWN && now - state.lastHazardAt >= SCARES.afterHazard;
+      if (!quiet) return { state };
+      const { state: next, fire } = fired(event.trigger);
+      return { state: { ...next, lastDoorAt: now }, fire };
+    }
     case 'trip': {
       const quiet =
         !event.blocked &&

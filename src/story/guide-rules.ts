@@ -26,8 +26,8 @@ export function nearestSpirit(
   return best;
 }
 
-/** A few cells along the way there (the whisper leads through the doorways, not through walls). */
-export function whisperPoint(path: readonly CellId[], steps = 4): CellId | undefined {
+/** Two cells along the way there, about 3 m (spec 25): the whisper leads through the doorways, not through walls. */
+export function whisperPoint(path: readonly CellId[], steps = 2): CellId | undefined {
   if (path.length === 0) return undefined;
   return path[Math.min(steps, path.length - 1)];
 }

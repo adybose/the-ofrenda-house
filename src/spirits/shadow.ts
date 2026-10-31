@@ -37,6 +37,16 @@ export const SHADOW = {
 /** The player's run speed (spec 05: walk 1.4 m/s × 1.8). */
 export const RUN_SPEED = 2.52;
 
+/**
+ * Spec 25: how often it steps out ahead of the player at a door or corner. By candle or match light
+ * alone (the torch off) it is bolder, and also tries every `candleEvery` seconds as they walk.
+ */
+export const AMBUSH = { chance: 0.3, perThreat: 0.05, gap: 30, candleChance: 0.65, candleGap: 18, candleEvery: 15 } as const;
+
+export function ambushOdds(threat: number, byCandle: boolean): { chance: number; gap: number } {
+  return byCandle ? { chance: AMBUSH.candleChance, gap: AMBUSH.candleGap } : { chance: AMBUSH.chance + AMBUSH.perThreat * threat, gap: AMBUSH.gap };
+}
+
 export type ShadowMode = 'dormant' | 'stalking' | 'hunting' | 'confronting' | 'chasing' | 'withdrawn' | 'lost' | 'caught';
 
 /** Modes in which the figure is in the house, moving. */

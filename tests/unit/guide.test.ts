@@ -23,7 +23,8 @@ describe('the whispers', () => {
   });
 
   it('sound a few cells along the way', () => {
-    expect(whisperPoint(['a', 'b', 'c', 'd', 'e', 'f'])).toBe('e');
+    // Two cells along the way, about 3 m (spec 25).
+    expect(whisperPoint(['a', 'b', 'c', 'd', 'e', 'f'])).toBe('c');
     expect(whisperPoint(['a', 'b'])).toBe('b');
     expect(whisperPoint([])).toBeUndefined();
   });

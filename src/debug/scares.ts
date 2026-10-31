@@ -14,6 +14,8 @@ export interface ScaresDebug {
   triggers(): ScareTrigger[];
   /** Spec 24: the cats sitting in the loaded rooms. */
   cats(): CatSeat[];
+  /** Spec 25: the nearest a bat has come to the camera since the last call, in metres. */
+  closestBat(): number;
 }
 
 declare global {
@@ -36,6 +38,7 @@ export function installScaresDebug(options: { scares: Scares; cats: CatEncounter
     active: () => scares.activeCount(),
     triggers: () => scares.allTriggers(),
     cats: () => options.cats.seats(),
+    closestBat: () => scares.takeClosestBat(),
   };
   const kind = options.fire;
   if (kind === 'bat' || kind === 'rat' || kind === 'cat') setTimeout(() => window.__scares!.fire(kind), 1000);

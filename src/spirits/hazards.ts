@@ -11,7 +11,7 @@ import { props } from '../render/props';
 import { paintingSpot } from '../scares/door-scares';
 import { DIR_STEP } from '../world/grid';
 import type { House } from '../world/house';
-import type { DoorId } from '../world/types';
+import type { CellId, DoorId } from '../world/types';
 import { ROOM_HEIGHT, cellCentre, worldToCell } from '../world/units';
 
 export type HazardKind = 'crash' | 'door' | 'torch';
@@ -22,13 +22,17 @@ declare module '../core/events' {
   }
 }
 
-/** Seconds between hazards at threat 0 (shorter as it grows bolder), and before the first. */
-const COOLDOWN = 45;
-const FIRST = 60;
+/** Seconds between hazards at threat 0 (shorter as it grows bolder), and before the first (spec 25). */
+const COOLDOWN = 28;
+const FIRST = 35;
 /** The creak comes this long before the hazard. */
 const WARNING = 0.5;
 /** A crash lands this far ahead, never closer. */
 const AHEAD = [2, 4] as const;
+/** La Sombra brings down a chandelier this far ahead (spec 25)... */
+const CHANDELIER_AHEAD = [2, 5.5] as const;
+/** ...and this nearly straight in front of the player (the cosine of the angle off their view). */
+const IN_VIEW = 0.85;
 /** A fallen chandelier or mirror blocks the way this long, a slammed door stays jammed this long. */
 const BLOCKS = 25;
 const JAMMED = 20;
@@ -64,6 +68,8 @@ export class Hazards implements CollisionMap {
   private readonly falling: Falling[] = [];
   private readonly jammed = new Map<DoorId, number>();
   private clock = 0;
+  /** The chandeliers already down. */
+  private readonly fallen = new Set<CellId>();
 
   constructor(
     private readonly options: {
@@ -75,6 +81,8 @@ export class Hazards implements CollisionMap {
       player: PlayerController;
       scene: Scene;
       textures: TextureCache;
+      /** Takes a room's chandelier down from its ceiling, as it falls (spec 25). */
+      takeDownChandelier?(cell: CellId): void;
     },
   ) {
     this.rng = createRng(options.seed).fork(STREAMS.shadow).fork('hazards');
@@ -110,8 +118,10 @@ export class Hazards implements CollisionMap {
     if (!active || this.pending) return;
     if ((this.nextIn -= dt) > 0) return;
     this.nextIn = (COOLDOWN / (1 + 0.3 * threat)) * (0.7 + 0.6 * this.rng.float());
-    const kinds: HazardKind[] = ['crash', 'door', 'torch'];
-    for (const kind of this.rng.shuffle(kinds)) if (this.fire(kind)) break;
+    // A crash (a chandelier or a painting falling in front of them) is tried first half the time.
+    const others = this.rng.shuffle<HazardKind>(['door', 'torch']);
+    const kinds: HazardKind[] = this.rng.chance(0.5) ? ['crash', ...others] : this.rng.shuffle<HazardKind>(['crash', ...others]);
+    for (const kind of kinds) if (this.fire(kind)) break;
   }
 
   /** Sets one off (after its creak). Returns false when there's nowhere for it now. */
@@ -154,11 +164,69 @@ export class Hazards implements CollisionMap {
     return undefined;
   }
 
+  /** La Sombra's crash: a chandelier ahead if there is one in view (spec 25), else a painting (24). */
+  private planCrash(): { position: [number, number, number]; fire(): void } | undefined {
+    return this.planChandelier() ?? this.planPainting();
+  }
+
+  /**
+   * The chandelier of the room the player is in, or looking into through an open door, 2 to 5.5 m
+   * ahead and nearly straight in front of them, so they see it come down (spec 25).
+   */
+  private planChandelier(): { position: [number, number, number]; fire(): void } | undefined {
+    const { house, player } = this.options;
+    const p = player.state();
+    const forward: [number, number] = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+    const here = house.roomAt(worldToCell(p.x, p.z));
+    if (!here) return undefined;
+    const rooms = [here, ...here.doors.flatMap((id) => {
+      const door = house.getDoor(id);
+      if (door?.state !== 'open') return [];
+      const other = [door.a, door.b].map((c) => house.roomAt(c)).find((r) => r && r.id !== here.id);
+      return other ? [other] : [];
+    })];
+    for (const room of rooms) {
+      for (const anchor of room.anchors) {
+        if (anchor.kind !== 'chandelier' || this.fallen.has(anchor.cell)) continue;
+        const [x, z] = cellCentre(anchor.cell);
+        const d = Math.hypot(x - p.x, z - p.z);
+        if (d < CHANDELIER_AHEAD[0] || d > CHANDELIER_AHEAD[1]) continue;
+        if (((x - p.x) * forward[0] + (z - p.z) * forward[1]) / d < IN_VIEW) continue;
+        if (!this.clearTo(x, z)) continue;
+        const height = ROOM_HEIGHT[room.size];
+        return {
+          position: [x, height - 0.3, z],
+          fire: () => {
+            this.options.takeDownChandelier?.(anchor.cell);
+            this.dropChandelier(x, z, anchor.cell, false);
+          },
+        };
+      }
+    }
+    return undefined;
+  }
+
+  /** Nothing but one room, or open doorways, between the player and (x, z). */
+  private clearTo(x: number, z: number): boolean {
+    const { house, player } = this.options;
+    const p = player.state();
+    const d = Math.hypot(x - p.x, z - p.z);
+    let last = worldToCell(p.x, p.z);
+    for (let s = 0.25; s <= d; s += 0.25) {
+      const cell = worldToCell(p.x + ((x - p.x) * s) / d, p.z + ((z - p.z) * s) / d);
+      if (cell === last) continue;
+      const [a, b] = [house.roomAt(last), house.roomAt(cell)];
+      if (!b || (a?.id !== b.id && house.doorBetween(last, cell)?.state !== 'open')) return false;
+      last = cell;
+    }
+    return true;
+  }
+
   /**
    * La Sombra's crash (spec 24): a painting comes down off the wall the player is facing, 1.2 to 3 m
    * ahead, so they see it fall; when they face no such wall, nothing.
    */
-  private planCrash(): { position: [number, number, number]; fire(): void } | undefined {
+  private planPainting(): { position: [number, number, number]; fire(): void } | undefined {
     const { house, player, scene, textures, audio } = this.options;
     const p = player.state();
     const room = house.roomAt(worldToCell(p.x, p.z));
@@ -209,9 +277,11 @@ export class Hazards implements CollisionMap {
 
   /**
    * A chandelier comes crashing down at (x, z) (spec 24: bats startled by the player opening a door
-   * bring it down in front of them). It blocks the way for a while.
+   * bring it down in front of them; spec 25: La Sombra). It blocks the way for a while. `creak`:
+   * whether to creak first (La Sombra's hazard has creaked already).
    */
-  dropChandelier(x: number, z: number): void {
+  dropChandelier(x: number, z: number, cell?: CellId, creak = true): void {
+    if (cell) this.fallen.add(cell);
     const { house, scene, textures, audio } = this.options;
     const height = ROOM_HEIGHT[house.roomAt(worldToCell(x, z))?.size ?? 'medium'];
     const chandelier = props.chandelier(textures);
@@ -226,7 +296,7 @@ export class Hazards implements CollisionMap {
       box: { minX: x - half, maxX: x + half, minZ: z - half, maxZ: z + half },
       left: BLOCKS,
     });
-    audio.play('creak', { position: [x, height - 0.3, z], gain: 1.2 });
+    if (creak) audio.play('creak', { position: [x, height - 0.3, z], gain: 1.2 });
     setTimeout(() => {
       audio.play('slam', { position: [x, 0.5, z], gain: 1.5 });
       audio.play('stinger', { gain: 0.8 });

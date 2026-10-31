@@ -47,6 +47,9 @@ export interface Creature {
   pose(t: number, from: Vector3, toward: Vector3): void;
 }
 
+/** How far into its flight a bat is in the player's face. */
+const FACE_AT = 0.6;
+
 function bat(): Creature {
   const group = new Group();
   const body = mesh(new SphereGeometry(0.06, 6, 4).scale(1, 0.8, 1.6), fur);
@@ -63,14 +66,25 @@ function bat(): Creature {
     group,
     seconds: 1.4,
     pose(t, from, toward) {
-      // Swoops at the face, veers past the shoulder and away.
-      const k = t / 1.4;
-      const past = new Vector3().subVectors(toward, from);
-      const target = from.clone().addScaledVector(past, 1.3);
-      target.x += Math.sin(k * Math.PI) * 0.6;
-      group.position.lerpVectors(from, target, k);
-      group.position.y += Math.sin(k * Math.PI) * 0.3;
-      group.lookAt(target);
+      // Straight at the face (spec 25), to a hand's breadth from the eyes, then veering up over
+      // the head and away behind.
+      const k = Math.min(1, t / 1.4);
+      // Level with the eyes, so its black wings cover what the light shows.
+      const back = new Vector3().subVectors(from, toward).setY(0).normalize();
+      const face = toward.clone().addScaledVector(back, 0.3);
+      if (k < FACE_AT) {
+        const u = k / FACE_AT;
+        group.position.lerpVectors(from, face, u * u);
+        group.position.x += Math.sin(u * Math.PI) * 0.15;
+        group.lookAt(face);
+      } else {
+        const u = (k - FACE_AT) / (1 - FACE_AT);
+        const over = toward.clone().addScaledVector(back, -2.5);
+        over.y += 0.8;
+        group.position.lerpVectors(face, over, u);
+        group.position.y += Math.sin(u * Math.PI) * 0.5;
+        group.lookAt(over);
+      }
       const flap = Math.sin(t * 2 * Math.PI * 16) * 1.1;
       left.rotation.z = flap;
       right.rotation.z = -flap;

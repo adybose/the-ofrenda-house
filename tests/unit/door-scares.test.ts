@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../src/core/rng';
-import { DOOR_SCARE_CHANCE, doorScare, paintingSpot } from '../../src/scares/door-scares';
+import { CHANDELIER_SHARE, DOOR_SCARE_CHANCE, doorScare, paintingSpot } from '../../src/scares/door-scares';
 import type { Room } from '../../src/world/types';
 import { newHouse } from './house-helpers';
 
@@ -16,7 +16,8 @@ const room = (chandelier: boolean): Room => ({
 });
 
 describe('door scares', () => {
-  it('come about 30% of the time, the chandelier only where one hangs, the same for a seed', () => {
+  it('come about 55% of the time, the chandelier only where one hangs, the same for a seed', () => {
+    expect(DOOR_SCARE_CHANCE).toBe(0.55);
     const rng = createRng(3);
     const counts = { none: 0, bats: 0, batsChandelier: 0, rats: 0 };
     for (let i = 0; i < 2000; i++) counts[doorScare(room(i % 2 === 0), rng) ?? 'none']++;
@@ -28,6 +29,20 @@ describe('door scares', () => {
     const a = Array.from({ length: 50 }, (_, i) => doorScare(room(true), createRng(9).fork(String(i))));
     const b = Array.from({ length: 50 }, (_, i) => doorScare(room(true), createRng(9).fork(String(i))));
     expect(a).toEqual(b);
+  });
+
+  it('bring the chandelier down about 70% of the time where one hangs (spec 25)', () => {
+    const rng = createRng(5);
+    let scares = 0;
+    let falls = 0;
+    for (let i = 0; i < 4000; i++) {
+      const scare = doorScare(room(true), rng);
+      if (!scare) continue;
+      scares++;
+      if (scare === 'batsChandelier') falls++;
+    }
+    expect(falls / scares).toBeGreaterThan(CHANDELIER_SHARE - 0.04);
+    expect(falls / scares).toBeLessThan(CHANDELIER_SHARE + 0.04);
   });
 
   it('can be forced for tests, never with a chandelier that isn’t there', () => {

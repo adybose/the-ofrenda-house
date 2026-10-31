@@ -33,7 +33,7 @@ export class Guide {
       player: PlayerController;
       resolved(characterId: CharacterId): boolean;
       keys: ReadonlySet<string>;
-      /** Seconds between whispers (debug, `&guide=N`); otherwise 25 to 35, seeded. */
+      /** Seconds between whispers (debug, `&guide=N`); otherwise 12 to 18, seeded (spec 25). */
       every?: number;
     },
   ) {
@@ -42,7 +42,7 @@ export class Guide {
   }
 
   private interval(): number {
-    return this.options.every ?? 25 + this.rng.float() * 10;
+    return this.options.every ?? 12 + this.rng.float() * 6;
   }
 
   /** Each frame. `active`: Act 2, and nothing else holds the screen. */
@@ -59,7 +59,8 @@ export class Guide {
     if (!point) return;
     const [x, z] = cellCentre(point);
     const position: [number, number, number] = [x, 1.6, z];
-    audio.play('whisper', { position, gain: 0.9 });
+    // Loud and near (spec 25): full level within 4 m, still heard from where it comes.
+    audio.play('whisper', { position, gain: 1.8, refDistance: 4 });
     events.emit('guideWhisper', { characterId: spirit.characterId, position });
   }
 }

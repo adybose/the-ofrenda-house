@@ -43,3 +43,4 @@ Vitest: spirit choice, whisper point, placement statistics. Playwright: a guide 
 - `&guide=N` (debug) whispers every N seconds.
 - The thresholds in the check above were lowered from the 80% and 95% first planned, to what the house allows: free dead ends a few doors from the player are scarce, and six or seven rooms compete for them. Measured over 100 seeds × 30 reshuffles: after reshuffles 89% of unvisited rooms are within 7 doors and 97% within 9 (before this spec, rooms were anywhere from 3 to 14 doors away).
 - Rooms are first placed measured from where Act 2 begins (the end of the Act 1 corridor, `ACT2_START_CELL`), not the entrance hall two doors further back. At the very start only about half can be within 7 doors (the house joins the wing at a single door, so few dead ends are close); the first lightning brings the rest nearer.
+- Amended by spec 25: whispers every 12 to 18 s, from 2 cells along the way, at gain 1.8 and full level within 4 m.

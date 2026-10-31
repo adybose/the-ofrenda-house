@@ -43,6 +43,8 @@ export class Scares {
 
   private blocked = false;
   private doorsOpened = 0;
+  /** Debug: the nearest any bat has come to the camera. */
+  private closestBat = Infinity;
 
   constructor(
     private readonly options: {
@@ -93,7 +95,7 @@ export class Scares {
     const at = kind === 'bat' ? { x: mx + fx * 3, y: 2.2, z: mz + fz * 3 } : { x: mx + fx * 2.5, y: 0.1, z: mz + fz * 2.5 };
     const trigger: ScareTrigger = { id: `door:${doorId}:${n}`, kind, roomId: beyond.id, ...at };
     const before = this.state.lastAt;
-    this.dispatch(this.options.forceDoorScare ? { type: 'force', trigger } : { type: 'trip', trigger, blocked: false });
+    this.dispatch(this.options.forceDoorScare ? { type: 'force', trigger } : { type: 'door', trigger, blocked: false });
     if (this.state.lastAt === before) return;
     // More of them behind the first, through the doorway at the player.
     const more = scare === 'rats' ? 1 : 1 + createRng(this.options.seed).fork('door-bats').fork(String(n)).int(0, 1);
@@ -163,7 +165,15 @@ export class Scares {
         continue;
       }
       a.creature.pose(a.t, a.from, a.toward);
+      if (a.creature.kind === 'bat') this.closestBat = Math.min(this.closestBat, a.creature.group.position.distanceTo(camera.position));
     }
+  }
+
+  /** Debug: the nearest a bat has come to the camera since the last call. */
+  takeClosestBat(): number {
+    const d = this.closestBat;
+    this.closestBat = Infinity;
+    return d;
   }
 
   /** Sets a creature loose at `at` (a story script, or debug). `force` ignores the cooldown and the rest. */

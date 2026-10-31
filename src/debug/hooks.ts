@@ -53,7 +53,7 @@ export interface OfrendaDebug {
   /** `tail`: seconds of sound after the words end (echo); `centroid`: brightness in Hz (see `spectrum`). */
   renderGhostVoice(kind: 'spirit' | 'shadow'): Promise<{ peak: number; rms: number; flatness: number; centroid: number; tail: number; hasNaN: boolean }>;
   setTension(level: number): void;
-  audioLevels(): { ambience: number; storm: number; thunder: number; master: number };
+  audioLevels(): { ambience: number; storm: number; thunder: number; master: number; score: { drone: number; strings: number } };
   setOutdoors(on: boolean): void;
   /** Whether a grandfather clock is ticking near the player. */
   ticking(): boolean;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../src/core/rng';
+import { DOOR_SCARE_COOLDOWN } from '../../src/scares/door-scares';
 import { SCARES, createScareState, placeTriggers, scareScheduler, type ScareState, type ScareTrigger } from '../../src/scares/scheduler';
 import { newHouse } from './house-helpers';
 
@@ -47,6 +48,18 @@ describe('the scare scheduler', () => {
     state = scareScheduler(state, { type: 'trip', trigger: t, blocked: false }, 0).state;
     state = scareScheduler(state, { type: 'enterRoom', roomId: 'room:1' }, 100).state;
     expect(scareScheduler(state, { type: 'trip', trigger: t, blocked: false }, 100).fire).toBeUndefined();
+  });
+
+  it('lets door scares come on their own shorter cooldown (spec 25), never while blocked', () => {
+    expect(DOOR_SCARE_COOLDOWN).toBeLessThan(SCARES.cooldown);
+    let state = scareScheduler(createScareState(), { type: 'trip', trigger: trigger('a'), blocked: false }, 0).state;
+    // A room scare just now doesn't hold a door scare back past its own cooldown...
+    expect(scareScheduler(state, { type: 'door', trigger: trigger('d1'), blocked: false }, DOOR_SCARE_COOLDOWN).fire?.id).toBe('d1');
+    state = scareScheduler(state, { type: 'door', trigger: trigger('d1'), blocked: false }, DOOR_SCARE_COOLDOWN).state;
+    // ...but two door scares are at least that far apart, and none while blocked.
+    expect(scareScheduler(state, { type: 'door', trigger: trigger('d2'), blocked: false }, DOOR_SCARE_COOLDOWN * 1.5).fire).toBeUndefined();
+    expect(scareScheduler(state, { type: 'door', trigger: trigger('d2'), blocked: true }, DOOR_SCARE_COOLDOWN * 2.5).fire).toBeUndefined();
+    expect(scareScheduler(state, { type: 'door', trigger: trigger('d2'), blocked: false }, DOOR_SCARE_COOLDOWN * 2.5).fire?.id).toBe('d2');
   });
 
   it('lets a story script force one, even during the cooldown, the same visit, or while blocked', () => {

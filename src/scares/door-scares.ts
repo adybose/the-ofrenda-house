@@ -9,19 +9,23 @@ import { worldToCell } from '../world/units';
 
 export type DoorScare = 'bats' | 'batsChandelier' | 'rats';
 
-/** How often a closed door the player opens has something behind it. */
-export const DOOR_SCARE_CHANCE = 0.3;
+/** How often a closed door the player opens has something behind it (spec 25). */
+export const DOOR_SCARE_CHANCE = 0.55;
+/** Seconds between door scares: their own cooldown, shorter than spec 13's. */
+export const DOOR_SCARE_COOLDOWN = 12;
+/** In a room with a chandelier, how many of its door scares bring it down. */
+export const CHANDELIER_SHARE = 0.7;
 
 /**
- * Behind a door the player has just opened: sometimes bats (in a room with a chandelier, half the
- * time bringing it down), or rats. `force` (debug) picks one.
+ * Behind a door the player has just opened: sometimes bats (in a room with a chandelier, mostly
+ * bringing it down), or rats. `force` (debug) picks one.
  */
 export function doorScare(room: Room, rng: Rng, force?: DoorScare): DoorScare | undefined {
   const chandelier = room.anchors.some((a) => a.kind === 'chandelier');
   if (force) return force === 'batsChandelier' && !chandelier ? 'bats' : force;
   if (!rng.chance(DOOR_SCARE_CHANCE)) return undefined;
-  if (chandelier) return rng.chance(0.5) ? 'batsChandelier' : 'bats';
-  return rng.chance(0.55) ? 'bats' : 'rats';
+  if (chandelier) return rng.chance(CHANDELIER_SHARE) ? 'batsChandelier' : 'bats';
+  return rng.chance(0.65) ? 'bats' : 'rats';
 }
 
 /** A painting can fall from the wall the player faces this far ahead, and no nearer or further. */

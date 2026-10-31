@@ -14,7 +14,7 @@ import type { CellId } from '../world/types';
 import { parseCell } from '../world/grid';
 import { cellCentre, worldToCell } from '../world/units';
 import { ShadowFigure } from './shadow-figure';
-import { PRESENT, SHADOW, chooseSpawn, createShadow, findPath, shadowReducer, speedFor, type ShadowMode, type ShadowState, type SpawnCandidate } from './shadow';
+import { AMBUSH, PRESENT, SHADOW, ambushOdds, chooseSpawn, createShadow, findPath, shadowReducer, speedFor, type ShadowMode, type ShadowState, type SpawnCandidate } from './shadow';
 import { fetchTaunt } from './taunts';
 import { DARK_LINES, FLEE_LINES, pickLine } from './lines';
 
@@ -36,12 +36,12 @@ const FADE = 0.6;
 const SIGHT = 14;
 /** Doors from the player's room within which it may appear. */
 const SPAWN_DOORS = 6;
-/** Spec 24: it steps out in front of the player at most this often... */
-const AMBUSH_GAP = 60;
-/** ...this far ahead of them... */
+/** Spec 24: it steps out in front of the player (as often as spec 25's `ambushOdds` allows) this far ahead of them... */
 const AMBUSH_AHEAD = [5, 4.5, 5.5, 4, 6];
 /** ...and darkness draws it this many seconds after the light goes out. */
 const ATTRACT_DELAY = [5, 10] as const;
+/** Seconds after the player starts walking by candlelight alone before its first try (spec 25). */
+const CANDLE_FIRST = 5;
 /** It flees a light this fast. */
 const FLEE_SPEED = 2.6;
 
@@ -60,6 +60,8 @@ export interface ShadowOptions {
   suppressed(): boolean;
   /** Debug (`&sombra=door`): step out at every door the player opens. */
   alwaysAmbush?: boolean;
+  /** Debug (`&sombra=candle`): step out at every chance while the player walks by candlelight. */
+  candleAmbush?: boolean;
   /** How frightening its nearness is, 0..1 (spec 24's fear holds at least this). */
   onTension?(level: number): void;
 }
@@ -83,6 +85,8 @@ export class ShadowController {
   private speaking = false;
   private time = 0;
   private lastAmbush = -Infinity;
+  /** Spec 25: while the player walks by candlelight alone, when it next tries to step out. */
+  private candleCheckAt: number | undefined;
   /** Whether the player had light last frame (unknown at first: Act 2 begins in the dark, which draws nothing). */
   private wasLit: boolean | undefined;
   private attractAt: number | undefined;
@@ -106,12 +110,18 @@ export class ShadowController {
     });
   }
 
-  /** Sometimes (more often as it grows bolder) it steps out a few metres ahead of the player. */
+  /**
+   * Sometimes (more often as it grows bolder, and by candlelight alone, spec 25) it steps out a few
+   * metres ahead of the player.
+   */
   private maybeAmbush(): void {
-    const { house, player, suppressed, alwaysAmbush } = this.options;
-    if (!this.enabled || suppressed() || this.time - this.lastAmbush < (alwaysAmbush ? 0 : AMBUSH_GAP)) return;
+    const { house, player, suppressed, flashlight, items } = this.options;
+    const byCandle = !flashlight.lit && items.holdsFlame();
+    const forced = this.options.alwaysAmbush || (this.options.candleAmbush && byCandle);
+    const odds = ambushOdds(this.state.threat, byCandle);
+    if (!this.enabled || suppressed() || this.time - this.lastAmbush < (forced ? 0 : odds.gap)) return;
     if (this.state.mode !== 'stalking' && this.state.mode !== 'withdrawn' && this.state.mode !== 'lost') return;
-    if (!alwaysAmbush && !this.rng.chance(0.15 + 0.05 * this.state.threat)) return;
+    if (!forced && !this.rng.chance(odds.chance)) return;
     const p = player.state();
     const playerCell = worldToCell(p.x, p.z);
     const [fx, fz] = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
@@ -212,9 +222,16 @@ export class ShadowController {
         const corridor = house.roomAt(playerCell)?.kind === 'corridor';
         if (corridor && this.lastStep && (step[0] !== this.lastStep[0] || step[1] !== this.lastStep[1])) this.maybeAmbush();
         this.lastStep = step;
+        // Spec 25: walking by candlelight alone, which shows only a few metres, it tries every so often.
+        if (this.candleCheckAt !== undefined && this.time >= this.candleCheckAt) {
+          this.candleCheckAt = this.time + AMBUSH.candleEvery;
+          this.maybeAmbush();
+        }
       }
       this.lastCell = playerCell;
     }
+    if (!flashlight.lit && items.holdsFlame()) this.candleCheckAt ??= this.time + CANDLE_FIRST;
+    else this.candleCheckAt = undefined;
 
     const present = PRESENT.has(this.state.mode);
     // Faced with a light it flees, still visible as it goes (spec 24); otherwise it comes on.
