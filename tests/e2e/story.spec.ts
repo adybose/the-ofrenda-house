@@ -60,8 +60,19 @@ test('Act 1: the shifting faces, the bat, the patriarch’s chase, the dead end,
   await stand(page, [7, 9]);
   await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'scareFired' && e.kind === 'bat')).toBe(true);
 
+  // He comes out through the wall behind his portrait at the end of the hall, to a step from the player.
   await stand(page, [7, 12]);
-  await expect(page.locator('#patriarch-line')).toContainText('Who are you? How dare you enter my house?');
+  await expect.poll(() => page.evaluate(() => window.__story!.revealFrom())).toBeDefined();
+  const from = (await page.evaluate(() => window.__story!.revealFrom()))!;
+  expect(from[1]).toBeLessThan(-22.4);
+  await expect(page.locator('#patriarch-line')).toContainText('Who are you? How dare you enter my house?', { timeout: 6000 });
+  const close = await page.evaluate(() => {
+    const [x, z] = window.__story!.patriarch()!;
+    const p = window.__ofrenda!.player();
+    return Math.hypot(x - p.x, z - p.z);
+  });
+  expect(close).toBeLessThanOrEqual(1.3);
+  await page.screenshot({ path: 'artifacts/screenshots/24-patriarch.png' });
   await expect(page.locator('#hint')).toContainText('hold Shift to run');
   await page.keyboard.down('Shift');
   await page.keyboard.down('ArrowUp');
@@ -108,6 +119,13 @@ test('Act 1: the shifting faces, the bat, the patriarch’s chase, the dead end,
   expect(await page.evaluate(() => window.__story!.stage())).toBe('act2');
   await expect(page.locator('#thought')).toHaveText('There must be a candle somewhere here.', { timeout: 6000 });
   await page.screenshot({ path: 'artifacts/screenshots/14-dead-end.png' });
+
+  // He stays in his corridor: out into the house and back again, and he speaks.
+  await stand(page, [-1, 2], -Math.PI / 2);
+  await page.evaluate(() => window.__ofrenda!.frames(5));
+  await stand(page, [1, 2], -Math.PI / 2);
+  await expect.poll(() => names(page), { timeout: 4000 }).toContain('patriarchSpoke');
+  await expect(page.locator('#patriarch-line')).not.toBeEmpty();
   expect(await page.evaluate(() => window.__ofrenda!.house.getDoor('d:-1,0:E')?.state)).toBe('closed');
 });
 

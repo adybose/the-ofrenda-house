@@ -569,7 +569,7 @@ async function startGame(): Promise<void> {
   if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
   if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, cats: cats!, player, fire: url.searchParams.get('fire') });
 
-  if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel() };
+  if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel(), revealFrom: () => story!.revealFrom(), patriarch: () => story!.patriarchAt() };
   // `&ending=true|escape|possessed|trapped`: straight to an ending screen.
   const ending = url.searchParams.get('ending');
   if (ending === 'true' || ending === 'escape' || ending === 'possessed' || ending === 'trapped') {
