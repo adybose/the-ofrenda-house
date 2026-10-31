@@ -36,7 +36,8 @@ export type Trigger =
   | 'shadowConfronts'
   | 'shadowChases'
   | 'wrongName'
-  | 'dawnFree';
+  | 'dawnFree'
+  | 'guideWhisper';
 
 export type Vars = Readonly<Record<string, string | boolean | undefined>>;
 
@@ -79,6 +80,7 @@ export const THOUGHTS: readonly Thought[] = [
   { id: 'chasedInDark', on: 'shadowChases', line: 'Light. I need light!', repeatEvery: 30 },
   { id: 'lastUntilDawn', on: 'wrongName', when: (_, v) => !v.key, line: "Nothing… I'll have to last until dawn." },
   { id: 'dawnFree', on: 'dawnFree', line: 'The front door. I have to find my way back.' },
+  { id: 'spiritCalls', on: 'guideWhisper', line: 'Whispers… from that way. Someone is waiting there.' },
 ];
 
 export interface MonologueState {

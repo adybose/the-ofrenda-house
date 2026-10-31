@@ -10,11 +10,13 @@ import {
   DIRS,
   DIR_STEP,
   FRONT_DOOR_ID,
+  KEY_ROOM_BAND,
   KEY_ROOM_MIN_DISTANCE,
   KEY_ROOM_REACH,
   LOAD_RADIUS,
   RESHUFFLE_RADIUS,
   SLOT_CELLS,
+  ACT2_START_CELL,
   START_CELL,
   UNLOAD_RADIUS,
   cellId,
@@ -381,11 +383,20 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
     if (toPlace.length === 0) return;
     const candidates = [...dist]
       .filter(([key, d]) => d >= KEY_ROOM_MIN_DISTANCE && isKeyCandidate(key, guarded))
-      .map(([key]) => key);
+      .map(([key, d]) => ({ key, d }));
+    // How far a distance lies outside the band (spec 23): 0 inside it.
+    const [near, far] = KEY_ROOM_BAND;
+    const gap = (d: number) => (d < near ? near - d : d > far ? d - far : 0);
     for (const keyRoom of toPlace) {
       let key: number | undefined;
       if (candidates.length > 0) {
-        key = candidates.splice(rng.int(0, candidates.length - 1), 1)[0];
+        // A dead end 5 to 7 doors away if one is free; otherwise as close to that as can be, nearer first.
+        const best = Math.min(...candidates.map((c) => gap(c.d)));
+        let pool = candidates.filter((c) => gap(c.d) === best);
+        if (pool.some((c) => c.d < near)) pool = pool.filter((c) => c.d < near);
+        const pick = pool[rng.int(0, pool.length - 1)]!;
+        candidates.splice(candidates.indexOf(pick), 1);
+        key = pick.key;
       } else {
         // Nothing within reach: take the nearest dead end beyond it rather than lose the room.
         const far = [...slotDistances(start, KEY_ROOM_REACH * 3)].filter(([k]) => isKeyCandidate(k, guarded));
@@ -432,7 +443,9 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
     return result;
   }
 
-  place(keyRooms, slotOfCell(...parseCell(START_CELL)), new Set(), root.fork('place:start'));
+  // Measured from where Act 2 begins, the end of the Act 1 corridor (spec 23), so the first spirits
+  // are a short walk from there.
+  place(keyRooms, slotOfCell(...parseCell(ACT2_START_CELL)), new Set(), root.fork('place:start'));
 
   return {
     seed,
@@ -496,7 +509,8 @@ export function createHouse(seed: number, caseFile: CaseFile): House {
         }
         const key = pack(...keyRoom.slot);
         const inRebuilt = bumped.has(pack(...chunkOfSlot(...keyRoom.slot)));
-        const outOfReach = !keyRoom.visited && !guarded.has(key) && !dist.has(key);
+        // Drifted too far from the player (spec 23: more than the band's far edge), and out of view.
+        const outOfReach = !keyRoom.visited && !guarded.has(key) && (dist.get(key) ?? Infinity) > KEY_ROOM_BAND[1];
         if (inRebuilt || outOfReach) {
           unassign(keyRoom);
           if (!keyRoom.visited) toPlace.push(keyRoom);

@@ -123,6 +123,11 @@ export class Encounters {
     return this.trustState;
   }
 
+  /** Whether a spirit's encounter has been had (spec 23's whispers lead only to the others). */
+  isResolved(characterId: CharacterId): boolean {
+    return this.resolved.has(characterId);
+  }
+
   isActive(): boolean {
     return this.active !== undefined;
   }

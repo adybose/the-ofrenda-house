@@ -107,6 +107,7 @@ export class Monologue {
       this.fire('keyTaken', { exit: keyId === EXIT_KEY, name: owner?.shortName, room });
     });
     events.on('riddleFailed', () => this.fire('riddleFailed'));
+    events.on('guideWhisper', () => this.fire('guideWhisper'));
     events.on('doorLocked', () => this.fire('doorLocked'));
     events.on('shadowStateChanged', ({ state }) => {
       if (state === 'confronting') this.fire('shadowConfronts');

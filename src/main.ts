@@ -23,6 +23,7 @@ import { Encounters } from './story/encounters';
 import { EXIT_KEY } from './story/accusation';
 import { Finale } from './story/finale';
 import { Dawn } from './story/dawn';
+import { Guide } from './story/guide';
 import { Monologue } from './story/thoughts';
 import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
@@ -395,6 +396,10 @@ async function startGame(): Promise<void> {
       line: createCaption({ id: 'patriarch-line', colour: '#efe4c8', bottom: '40%' }),
     },
   });
+  // Finding the spirits (spec 23): whispers from the way to the nearest one not yet met.
+  const guideEvery = Number(url.searchParams.get('guide') ?? 0) || undefined;
+  const guide = new Guide({ seed, house, audio, player, resolved: (id) => encounters!.isResolved(id), keys, every: guideEvery });
+
   // Dawn (spec 22): the patriarch's last question at six.
   dawn = new Dawn({
     seed,
@@ -484,6 +489,7 @@ async function startGame(): Promise<void> {
       const heldOff = caught || ended || story!.isActive() || dawn!.isActive() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive();
       dawn!.update(dt, time / 1000, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
       monologue.update(dt, heldOff);
+      guide.update(dt, !heldOff && story!.stage === 'act2' && !dawn!.over());
       // After dawn the scares are over too (spec 22).
       scares!.update(dt, heldOff || dawn!.over());
     }
