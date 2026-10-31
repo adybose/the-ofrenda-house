@@ -3,7 +3,7 @@ import { mockModel, winEncounter } from './encounter-helpers';
 import { expect, test } from './fixtures';
 
 // Spec 12: La Sombra chases a player in the dark, confronts one with light, never enters a lit
-// sanctuary, catches a player it reaches in the dark, and brings a chandelier down ahead of them.
+// sanctuary, catches a player it reaches in the dark (after spec 26's 1.5 s grasp), and brings a chandelier down ahead of them.
 
 async function boot(page: Page, debug = 'hooks,shadow,items') {
   // Never the real model or Piper: its taunts fall back to the hand-written ones.
@@ -90,7 +90,8 @@ test('it never comes into a solved spirit’s room while its candle burns', asyn
 test('caught in the dark: the screen goes black and the player is possessed', async ({ page }) => {
   await boot(page);
   expect(await page.evaluate(() => window.__shadow!.summon(2.5, 'chasing'))).toBe(true);
-  await expect.poll(() => mode(page), { timeout: 6000 }).toBe('caught');
+  await expect.poll(() => mode(page), { timeout: 6000 }).toBe('grasping');
+  await expect.poll(() => mode(page), { timeout: 3000 }).toBe('caught');
   await expect(page.locator('#ending[data-kind="possessed"]')).toContainText('You lost. You were possessed by the spirit of La Sombra.');
   await page.waitForTimeout(4000);
   await page.screenshot({ path: 'artifacts/screenshots/12-caught.png' });
