@@ -13,6 +13,7 @@ import { nearestWindow } from './lighting/windows';
 import { createTextureCache } from './render/atlas';
 import { createPostPipeline } from './render/post';
 import { WorldView } from './render/world-view';
+import { hideChandelier } from './render/chunk-mesh';
 import { createPlayerController } from './player/controller';
 import { DoorController } from './player/doors';
 import { Interactions } from './player/interaction';
@@ -24,11 +25,13 @@ import { EXIT_KEY } from './story/accusation';
 import { Finale } from './story/finale';
 import { Dawn } from './story/dawn';
 import { Guide } from './story/guide';
+import { FearController } from './story/fear-controller';
 import { Monologue } from './story/thoughts';
 import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
 import { Hazards } from './spirits/hazards';
 import { Scares } from './scares/scares';
+import { CatEncounters } from './scares/cat-encounters';
 import { ShadowController } from './spirits/shadow-controller';
 import { createCaption } from './ui/caption';
 import { StoryFlow } from './story/act1';
@@ -42,7 +45,7 @@ import { createJournal, type Journal } from './ui/journal';
 import { createPrompt } from './ui/prompt';
 import { createCollisionMap } from './world/collision';
 import { composeCollision, exteriorCollision, exteriorLayout } from './world/exterior';
-import { DIR_STEP, cellId, parseCell } from './world/grid';
+import { DIR_STEP, cellId, chunkId, chunkOfCell, parseCell } from './world/grid';
 import { createHouse } from './world/house';
 import type { CellId, ChunkDiff, Room } from './world/types';
 import { cellCentre, worldToCell } from './world/units';
@@ -102,11 +105,13 @@ async function startGame(): Promise<void> {
   const items = new ItemsController({ scene, house, interactions, matches: url.searchParams.has('matches') ? Number(url.searchParams.get('matches')) : undefined });
   // Built once the audio and torch exist (spec 13); it catches up on the chunks loaded before then.
   let scares: Scares | undefined = undefined;
+  let cats: CatEncounters | undefined = undefined;
   const applyDiff = (diff: ChunkDiff, options?: { spread?: boolean }) => {
     view.apply(diff, options);
     doors.sync(diff);
     items.sync(diff);
     scares?.sync(diff);
+    cats?.sync(diff);
   };
 
   // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall with
@@ -238,6 +243,8 @@ async function startGame(): Promise<void> {
   // Conversations, the journal and the HUD (spec 10). Dialogue or the journal stops the player
   // moving; the journal also pauses the world while it is open.
   const hud = createHud({ prompt });
+  // The player's fear (spec 24): the heartbeat and the heart on the HUD.
+  const fear = new FearController({ audio, hud });
   events.on('batteryChanged', ({ level }) => hud.set('battery', level));
   let journal: Journal | undefined = undefined;
   let encounters: Encounters | undefined = undefined;
@@ -279,7 +286,28 @@ async function startGame(): Promise<void> {
   events.on('ending', () => (ended = true));
 
   // Bats, rats and cats (spec 13), in the rooms already loaded and every chunk from now on.
-  scares = new Scares({ seed, house, scene, camera, audio, flashlight, player });
+  const doorScareParam = url.searchParams.get('doorscare');
+  scares = new Scares({
+    seed,
+    house,
+    scene,
+    camera,
+    audio,
+    flashlight,
+    player,
+    // Bats startled by an opened door bring a chandelier down in front of the player (spec 24).
+    dropChandelier: (x, z, cell) => {
+      const group = view.chunk(chunkId(...chunkOfCell(cell)));
+      if (group) hideChandelier(group, cell);
+      hazards?.dropChandelier(x, z);
+    },
+    forceDoorScare: doorScareParam === 'bats' || doorScareParam === 'batsChandelier' || doorScareParam === 'rats' ? doorScareParam : undefined,
+    // A cat in the room beyond the door is startled instead (spec 24).
+    startleCat: (roomId) => cats?.startle(roomId) ?? false,
+  });
+  // Cats on the furniture (spec 24); `&cats=all` seats one wherever one fits.
+  cats = new CatEncounters({ seed, scene, camera, audio, player, all: url.searchParams.get('cats') === 'all' });
+  cats.sync({ loaded: house.loadedChunks(), unloaded: [] });
   scares.sync({ loaded: house.loadedChunks(), unloaded: [] });
 
   // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it
@@ -336,6 +364,8 @@ async function startGame(): Promise<void> {
     scene,
     caption: createCaption(),
     suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+    onTension: (level) => fear.hold(level),
+    alwaysAmbush: url.searchParams.get('sombra') === 'door',
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
   events.on('caughtByShadow', () => {
@@ -490,8 +520,10 @@ async function startGame(): Promise<void> {
       dawn!.update(dt, time / 1000, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
       monologue.update(dt, heldOff);
       guide.update(dt, !heldOff && story!.stage === 'act2' && !dawn!.over());
+      fear.update(dt);
       // After dawn the scares are over too (spec 22).
       scares!.update(dt, heldOff || dawn!.over());
+      if (!heldOff) cats!.update(dt);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
@@ -535,9 +567,9 @@ async function startGame(): Promise<void> {
   if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
   if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
   if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
-  if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, player, fire: url.searchParams.get('fire') });
+  if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, cats: cats!, player, fire: url.searchParams.get('fire') });
 
-  if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel() };
+  if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel(), revealFrom: () => story!.revealFrom(), patriarch: () => story!.patriarchAt() };
   // `&ending=true|escape|possessed|trapped`: straight to an ending screen.
   const ending = url.searchParams.get('ending');
   if (ending === 'true' || ending === 'escape' || ending === 'possessed' || ending === 'trapped') {

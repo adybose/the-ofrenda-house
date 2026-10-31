@@ -11,16 +11,20 @@ import type { DoorController } from '../player/doors';
 import type { Caption } from '../ui/caption';
 import type { House } from '../world/house';
 import type { CellId } from '../world/types';
+import { parseCell } from '../world/grid';
 import { cellCentre, worldToCell } from '../world/units';
 import { ShadowFigure } from './shadow-figure';
 import { PRESENT, SHADOW, chooseSpawn, createShadow, findPath, shadowReducer, speedFor, type ShadowMode, type ShadowState, type SpawnCandidate } from './shadow';
 import { fetchTaunt } from './taunts';
+import { DARK_LINES, FLEE_LINES, pickLine } from './lines';
 
 declare module '../core/events' {
   interface GameEvents {
     shadowStateChanged: { state: ShadowMode };
     /** La Sombra caught a player in the dark: the possessed ending (spec 14). */
     caughtByShadow: Record<string, never>;
+    /** It laughed at a player holding a light, before fleeing (spec 24). */
+    shadowLaughed: Record<string, never>;
   }
 }
 
@@ -32,6 +36,14 @@ const FADE = 0.6;
 const SIGHT = 14;
 /** Doors from the player's room within which it may appear. */
 const SPAWN_DOORS = 6;
+/** Spec 24: it steps out in front of the player at most this often... */
+const AMBUSH_GAP = 60;
+/** ...this far ahead of them... */
+const AMBUSH_AHEAD = [5, 4.5, 5.5, 4, 6];
+/** ...and darkness draws it this many seconds after the light goes out. */
+const ATTRACT_DELAY = [5, 10] as const;
+/** It flees a light this fast. */
+const FLEE_SPEED = 2.6;
 
 export interface ShadowOptions {
   seed: number;
@@ -46,6 +58,10 @@ export interface ShadowOptions {
   caption: Caption;
   /** Encounters, the journal, dialogue: it holds off. */
   suppressed(): boolean;
+  /** Debug (`&sombra=door`): step out at every door the player opens. */
+  alwaysAmbush?: boolean;
+  /** How frightening its nearness is, 0..1 (spec 24's fear holds at least this). */
+  onTension?(level: number): void;
 }
 
 /**
@@ -65,6 +81,14 @@ export class ShadowController {
   private repath = 0;
   private enabled = false;
   private speaking = false;
+  private time = 0;
+  private lastAmbush = -Infinity;
+  /** Whether the player had light last frame (unknown at first: Act 2 begins in the dark, which draws nothing). */
+  private wasLit: boolean | undefined;
+  private attractAt: number | undefined;
+  private recentLines: string[] = [];
+  private lastCell: CellId | undefined;
+  private lastStep: [number, number] | undefined;
 
   constructor(private readonly options: ShadowOptions) {
     this.state = createShadow(createRng(options.seed).fork(STREAMS.shadow).seed);
@@ -76,6 +100,33 @@ export class ShadowController {
     events.on('accused', ({ correct }) => {
       if (!correct) this.dispatch({ type: 'wrongName' });
     });
+    // Spec 24: it may step out in front of a player who opens a door.
+    events.on('doorOpened', ({ byPlayer }) => {
+      if (byPlayer) this.maybeAmbush();
+    });
+  }
+
+  /** Sometimes (more often as it grows bolder) it steps out a few metres ahead of the player. */
+  private maybeAmbush(): void {
+    const { house, player, suppressed, alwaysAmbush } = this.options;
+    if (!this.enabled || suppressed() || this.time - this.lastAmbush < (alwaysAmbush ? 0 : AMBUSH_GAP)) return;
+    if (this.state.mode !== 'stalking' && this.state.mode !== 'withdrawn' && this.state.mode !== 'lost') return;
+    if (!alwaysAmbush && !this.rng.chance(0.15 + 0.05 * this.state.threat)) return;
+    const p = player.state();
+    const playerCell = worldToCell(p.x, p.z);
+    const [fx, fz] = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+    for (const d of AMBUSH_AHEAD) {
+      const [x, z] = [p.x + fx * d, p.z + fz * d];
+      const cell = worldToCell(x, z);
+      if (!house.roomAt(cell) || this.blocked(cell) || !findPath(house, cell, playerCell)) continue;
+      this.lastAmbush = this.time;
+      [this.x, this.z] = [x, z];
+      this.path = [];
+      this.repath = 0;
+      this.dispatch({ type: 'ambush' });
+      this.figure.setFade(0.6);
+      return;
+    }
   }
 
   get mode(): ShadowMode {
@@ -136,20 +187,46 @@ export class ShadowController {
   update(dt: number, time: number): void {
     this.figure.update(time);
     if (!this.enabled) return;
-    const { player, items, flashlight, audio, suppressed } = this.options;
+    this.time += dt;
+    const { player, items, flashlight, suppressed, house } = this.options;
     const p = player.state();
     const playerCell = worldToCell(p.x, p.z);
     const hushed = suppressed();
+    const lit = items.inLight(flashlight.lit, playerCell);
+
+    // Spec 24: darkness draws it, a few seconds after the light goes out, unless it comes back.
+    if (this.wasLit === true && !lit) this.attractAt = this.time + ATTRACT_DELAY[0] + this.rng.float() * (ATTRACT_DELAY[1] - ATTRACT_DELAY[0]);
+    if (lit) this.attractAt = undefined;
+    this.wasLit = lit;
+    if (this.attractAt !== undefined && this.time >= this.attractAt && !hushed) {
+      this.attractAt = undefined;
+      this.dispatch({ type: 'attract' });
+    }
+
+    // Spec 24: turning a corner in a corridor, it may be waiting round it.
+    if (playerCell !== this.lastCell) {
+      if (this.lastCell) {
+        const [x0, y0] = parseCell(this.lastCell);
+        const [x1, y1] = parseCell(playerCell);
+        const step: [number, number] = [x1 - x0, y1 - y0];
+        const corridor = house.roomAt(playerCell)?.kind === 'corridor';
+        if (corridor && this.lastStep && (step[0] !== this.lastStep[0] || step[1] !== this.lastStep[1])) this.maybeAmbush();
+        this.lastStep = step;
+      }
+      this.lastCell = playerCell;
+    }
 
     const present = PRESENT.has(this.state.mode);
-    if (present) this.move(dt, p.x, p.z, playerCell);
+    // Faced with a light it flees, still visible as it goes (spec 24); otherwise it comes on.
+    if (this.state.mode === 'confronting' || (this.state.mode === 'withdrawn' && this.figure.fade > 0)) this.flee(dt, p.x, p.z);
+    else if (present) this.move(dt, p.x, p.z, playerCell);
     const distance = present ? Math.hypot(this.x - p.x, this.z - p.z) : Infinity;
     this.dispatch({
       type: 'tick',
       dt,
       sees: present && this.sees(distance, playerCell),
       distance,
-      inLight: items.inLight(flashlight.lit, playerCell),
+      inLight: lit,
       suppressed: hushed,
     });
 
@@ -158,8 +235,17 @@ export class ShadowController {
     this.figure.position.set(this.x, 0, this.z);
     this.figure.rotation.y = Math.atan2(p.x - this.x, p.z - this.z);
     const near = shown ? Math.min(1, Math.max(0, 1 - (distance - 2) / 16)) : 0;
-    audio.setTension(this.state.mode === 'chasing' ? near : near * 0.6);
+    this.options.onTension?.(this.state.mode === 'chasing' ? Math.max(0.85, near) : near * 0.6);
     flashlight.setFlicker(this.state.mode === 'chasing' && distance < 8 ? 0.8 * (1 - distance / 8) : 0);
+  }
+
+  /** Away from the player, through open floor only. */
+  private flee(dt: number, px: number, pz: number): void {
+    const dx = this.x - px;
+    const dz = this.z - pz;
+    const d = Math.hypot(dx, dz) || 1;
+    const [nx, nz] = [this.x + (dx / d) * FLEE_SPEED * dt, this.z + (dz / d) * FLEE_SPEED * dt];
+    if (this.options.house.roomAt(worldToCell(nx, nz))) [this.x, this.z] = [nx, nz];
   }
 
   /** Cells of a sanctuary: a solved spirit's room whose candle burns (spec 18). */
@@ -238,7 +324,10 @@ export class ShadowController {
     for (const emit of this.state.emits) {
       if (emit === 'appear' && event.type !== 'force') this.appear();
       else if (emit === 'whisper') this.whisper();
-      else if (emit === 'threaten' || emit === 'taunt') void this.say();
+      else if (emit === 'laugh') this.laugh();
+      else if (emit === 'threaten') void this.say(FLEE_LINES);
+      else if (emit === 'darkLine') void this.say(DARK_LINES);
+      else if (emit === 'taunt') void this.say();
       else if (emit === 'caught') events.emit('caughtByShadow', {});
     }
   }
@@ -284,11 +373,24 @@ export class ShadowController {
     this.options.audio.play('whisper', { position: [p.x + Math.cos(angle) * reach, 1.6, p.z + Math.sin(angle) * reach], gain: 0.8 });
   }
 
-  /** A threat or a taunt, in its voice, at the figure, and as a caption. */
-  private async say(): Promise<void> {
+  /** Its laugh, deep and close, at a player who holds a light. */
+  private laugh(): void {
+    this.options.audio.play('laugh', { position: [this.x, 1.9, this.z], param: 0.55, gain: 1.8 });
+    events.emit('shadowLaughed', {});
+  }
+
+  /** A line in its voice, at the figure, and as a caption: one of `lines`, or a chase taunt from the model. */
+  private async say(lines?: readonly string[]): Promise<void> {
     if (this.speaking) return;
     this.speaking = true;
-    const line = await fetchTaunt(this.options.seed, 'chase', this.rng.float());
+    let line: string;
+    if (lines) {
+      const picked = pickLine(lines, this.recentLines, this.rng);
+      this.recentLines = picked.recent;
+      line = picked.line;
+    } else {
+      line = await fetchTaunt(this.options.seed, 'chase', this.rng.float());
+    }
     this.options.caption.show('La Sombra', line);
     await this.options.speaker.speak(line, SHADOW_VOICE, [this.x, 1.9, this.z]);
     setTimeout(() => (this.speaking = false), 1500);

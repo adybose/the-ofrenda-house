@@ -9,6 +9,10 @@ import type { Vec3 } from './engine';
 
 /** The whole chain's level: Piper normalises speech near full scale, and the echo adds to it. */
 const LEVEL = 0.6;
+/** How much louder La Sombra speaks than a spirit. */
+const SHADOW_LOUDER = 2;
+/** tanh: gentle above about 0.5, never past 1. */
+const SOFT_LIMIT = Float32Array.from({ length: 1025 }, (_, i) => Math.tanh(((i - 512) / 512) * 2));
 
 function delayLine(ctx: BaseAudioContext, input: AudioNode, out: AudioNode, seconds: number, feedback: number, tone: number, level: number): void {
   const delay = ctx.createDelay(1);
@@ -70,7 +74,16 @@ export function ghostVoice(ctx: BaseAudioContext, buffer: AudioBuffer, voice: Vo
   source.buffer = buffer;
   source.playbackRate.value = voice.pitch;
   const level = ctx.createGain();
-  level.gain.value = LEVEL;
+  // La Sombra speaks louder than the spirits (spec 24): driven harder into a soft limiter, so it is
+  // louder all through but never clips.
+  level.gain.value = voice.shadow ? LEVEL * SHADOW_LOUDER : LEVEL;
+  let into: AudioNode = level;
+  if (voice.shadow) {
+    const limiter = ctx.createWaveShaper();
+    limiter.curve = SOFT_LIMIT;
+    level.connect(limiter);
+    into = limiter;
+  }
   if (position) {
     const panner = ctx.createPanner();
     panner.panningModel = 'HRTF';
@@ -79,9 +92,9 @@ export function ghostVoice(ctx: BaseAudioContext, buffer: AudioBuffer, voice: Vo
     panner.positionX.value = position[0];
     panner.positionY.value = position[1];
     panner.positionZ.value = position[2];
-    level.connect(panner).connect(out);
+    into.connect(panner).connect(out);
   } else {
-    level.connect(out);
+    into.connect(out);
   }
   const seconds = buffer.duration / voice.pitch;
   if (voice.shadow) {

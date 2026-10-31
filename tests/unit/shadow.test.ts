@@ -46,7 +46,8 @@ describe('modes', () => {
   it('confronts a player in light: threatens once, then withdraws for 30 to 60 s, then stalks', () => {
     const confronting = shadowReducer(hunting(), tick({ sees: true, inLight: true, distance: 6 }));
     expect(confronting.mode).toBe('confronting');
-    expect(confronting.emits).toEqual(['threaten']);
+    // It laughs, then says its piece (spec 24).
+    expect(confronting.emits).toEqual(['laugh', 'threaten']);
     // It never chases or catches a player in light, however close.
     const { state, emits } = until(confronting, tick({ sees: true, inLight: true, distance: 0.5 }));
     expect(emits.filter((e) => e === 'threaten')).toHaveLength(0);
@@ -65,7 +66,7 @@ describe('modes', () => {
     expect(chasing.emits).toEqual(['taunt']);
     const lit = shadowReducer(chasing, tick({ sees: true, inLight: true, distance: 3 }));
     expect(lit.mode).toBe('confronting');
-    expect(lit.emits).toEqual(['threaten']);
+    expect(lit.emits).toEqual(['laugh', 'threaten']);
   });
 
   it('loses the player beyond 15 m, or after 4 s out of sight', () => {
@@ -101,6 +102,36 @@ describe('modes', () => {
     const { emits, state } = until(hushed, tick({ dt: 1, suppressed: true }), 300);
     expect(state.mode).toBe('stalking');
     expect(emits).toEqual([]);
+  });
+});
+
+describe('drawn by darkness, and stepping out in front (spec 24)', () => {
+  it('comes when the light goes out, from stalking, withdrawn or lost, saying something about the dark', () => {
+    const stalking = run(createShadow(1), { type: 'enable' });
+    const drawn = shadowReducer(stalking, { type: 'attract' });
+    expect(drawn.mode).toBe('hunting');
+    expect(drawn.emits).toEqual(['appear', 'darkLine']);
+    for (const mode of ['withdrawn', 'lost'] as const) {
+      expect(run(stalking, { type: 'force', mode }, { type: 'attract' }).mode).toBe('hunting');
+    }
+  });
+
+  it('does not when asleep, already here, or done', () => {
+    expect(shadowReducer(createShadow(1), { type: 'attract' }).mode).toBe('dormant');
+    const chasing = run(createShadow(1), { type: 'enable' }, { type: 'force', mode: 'chasing' });
+    expect(shadowReducer(chasing, { type: 'attract' }).mode).toBe('chasing');
+    const caught = run(chasing, tick({ sees: true, distance: 0.5 }));
+    expect(caught.mode).toBe('caught');
+    expect(shadowReducer(caught, { type: 'attract' }).mode).toBe('caught');
+    expect(shadowReducer(caught, { type: 'ambush' }).mode).toBe('caught');
+  });
+
+  it('steps out in front of the player, then laughs and flees a light, or charges the dark', () => {
+    const ambush = run(createShadow(1), { type: 'enable' }, { type: 'ambush' });
+    expect(ambush.mode).toBe('hunting');
+    expect(ambush.emits).toEqual(['ambush']);
+    expect(shadowReducer(ambush, tick({ sees: true, inLight: true, distance: 5 })).emits).toEqual(['laugh', 'threaten']);
+    expect(shadowReducer(ambush, tick({ sees: true, inLight: false, distance: 5 })).mode).toBe('chasing');
   });
 });
 

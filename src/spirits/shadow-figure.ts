@@ -1,4 +1,4 @@
-import { CylinderGeometry, Group, IcosahedronGeometry, LatheGeometry, Mesh, ShaderMaterial, Vector2, type BufferGeometry } from 'three';
+import { AdditiveBlending, CylinderGeometry, Group, IcosahedronGeometry, LatheGeometry, Mesh, MeshBasicMaterial, ShaderMaterial, SphereGeometry, Vector2, type BufferGeometry } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // La Sombra (spec 12): a tall faceless silhouette in a long cloak, blacker than the dark around it.
@@ -52,8 +52,11 @@ void main() {
   // It frays into nothing at the hem.
   float hem = smoothstep(0.0, 0.35, vHeight);
   float alpha = (0.97 - 0.9 * edge) * hem * fade;
+  // A smouldering dark-red rim, so the shape shows against total darkness (spec 24).
+  float ember = smoothstep(0.55, 1.0, rim) * (0.6 + 0.4 * n);
+  alpha = max(alpha, ember * 0.55 * hem * fade);
   if (alpha < 0.02) discard;
-  gl_FragColor = vec4(vec3(0.0), alpha);
+  gl_FragColor = vec4(vec3(0.42, 0.03, 0.02) * ember, alpha);
 }
 `;
 
@@ -81,6 +84,7 @@ function silhouette(): BufferGeometry {
 
 export class ShadowFigure extends Group {
   private readonly material: ShaderMaterial;
+  private readonly eyes: MeshBasicMaterial;
   private fadeLevel = 0;
 
   constructor() {
@@ -94,6 +98,20 @@ export class ShadowFigure extends Group {
     });
     const mesh = new Mesh(silhouette(), this.material);
     mesh.renderOrder = 9;
+    // Two burning eyes deep in the hood, in the dark as in the light (spec 24).
+    this.eyes = new MeshBasicMaterial({ color: 0xff2a10, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false });
+    for (const side of [-1, 1]) {
+      const eye = new Mesh(new SphereGeometry(0.03, 6, 4).scale(1.4, 0.7, 0.6), this.eyes);
+      eye.position.set(side * 0.06, 2.1, 0.15);
+      eye.renderOrder = 10;
+      mesh.add(eye);
+      const glow = new Mesh(new SphereGeometry(0.07, 6, 4), this.eyes);
+      glow.position.copy(eye.position);
+      glow.scale.setScalar(1.2);
+      mesh.add(glow);
+    }
+    // Taller and more ominous than a man.
+    mesh.scale.setScalar(1.15);
     this.add(mesh);
     this.name = 'la-sombra';
   }
@@ -110,5 +128,6 @@ export class ShadowFigure extends Group {
   update(time: number): void {
     this.material.uniforms.time!.value = time;
     this.material.uniforms.fade!.value = this.fadeLevel;
+    this.eyes.opacity = this.fadeLevel * (0.85 + 0.15 * Math.sin(time * 7));
   }
 }

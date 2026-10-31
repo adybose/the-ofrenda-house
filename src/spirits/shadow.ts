@@ -42,7 +42,7 @@ export type ShadowMode = 'dormant' | 'stalking' | 'hunting' | 'confronting' | 'c
 /** Modes in which the figure is in the house, moving. */
 export const PRESENT: ReadonlySet<ShadowMode> = new Set(['hunting', 'confronting', 'chasing']);
 
-export type ShadowEmit = 'appear' | 'vanish' | 'whisper' | 'threaten' | 'taunt' | 'caught';
+export type ShadowEmit = 'appear' | 'ambush' | 'vanish' | 'whisper' | 'laugh' | 'threaten' | 'taunt' | 'darkLine' | 'caught';
 
 export interface ShadowState {
   mode: ShadowMode;
@@ -69,7 +69,11 @@ export type ShadowEvent =
   | { type: 'wrongName' }
   | { type: 'hourPassed' }
   /** Debug: put it in a mode at once. */
-  | { type: 'force'; mode: ShadowMode };
+  | { type: 'force'; mode: ShadowMode }
+  /** Spec 24: the player's light has gone out, and stayed out; it comes for them. */
+  | { type: 'attract' }
+  /** Spec 24: it steps out in front of the player (a door they opened, a corner they turned). */
+  | { type: 'ambush' };
 
 export function createShadow(seed: number, threat = 0): ShadowState {
   return { mode: 'dormant', threat, modeTime: 0, nextWhisper: 0, nextTaunt: 0, away: 0, unseen: 0, seed, draws: 0, emits: [] };
@@ -101,6 +105,11 @@ export function shadowReducer(state: ShadowState, event: ShadowEvent): ShadowSta
     case 'wrongName':
     case 'hourPassed':
       return bolder();
+    case 'attract':
+    case 'ambush':
+      // From the shadows only: not asleep, not already here, not done.
+      if (state.mode !== 'stalking' && state.mode !== 'withdrawn' && state.mode !== 'lost') return next({});
+      return enter('hunting', event.type === 'attract' ? ['appear', 'darkLine'] : ['ambush']);
     case 'force': {
       const emits: ShadowEmit[] = PRESENT.has(event.mode) && !PRESENT.has(state.mode) ? ['appear'] : [];
       return enter(event.mode, emits, { nextTaunt: SHADOW.tauntSeconds, nextWhisper: SHADOW.whisperSeconds[state.threat]! });
@@ -122,7 +131,7 @@ export function shadowReducer(state: ShadowState, event: ShadowEvent): ShadowSta
       return next({ modeTime: time });
     }
     case 'hunting':
-      if (sees) return inLight ? enter('confronting', ['threaten']) : enter('chasing', ['taunt'], { nextTaunt: SHADOW.tauntSeconds });
+      if (sees) return inLight ? enter('confronting', ['laugh', 'threaten']) : enter('chasing', ['taunt'], { nextTaunt: SHADOW.tauntSeconds });
       if (time >= SHADOW.huntGiveUp) return stalk(['vanish']);
       return next({ modeTime: time });
     case 'confronting': {
@@ -136,7 +145,7 @@ export function shadowReducer(state: ShadowState, event: ShadowEvent): ShadowSta
     case 'lost':
       return time >= SHADOW.lostSeconds ? stalk() : next({ modeTime: time });
     case 'chasing': {
-      if (inLight) return enter('confronting', ['threaten']);
+      if (inLight) return enter('confronting', ['laugh', 'threaten']);
       if (canCatch(distance, inLight)) return enter('caught', ['caught']);
       const unseen = sees ? 0 : state.unseen + dt;
       if (distance > SHADOW.loseDistance || unseen >= SHADOW.loseUnseen) return enter('lost', ['vanish']);

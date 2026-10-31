@@ -9,6 +9,8 @@ export interface Hud {
   set(slot: HudSlot, value: string | number | undefined): void;
   /** Spec 14's candle clock: the time, and a candle burning down with the night left (0..1). */
   clock(text: string, left: number): void;
+  /** Spec 24: the heart, pulsing at this many beats a minute. */
+  heart(bpm: number): void;
 }
 
 export function createHud(options: { prompt: { show(text: string): void; hide(): void } }): Hud {
@@ -32,6 +34,18 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
   const candles = corner('hud-candles', { right: '16px', bottom: '40px' });
   const keys = corner('hud-keys', { right: '16px', bottom: '16px' });
   const clock = corner('hud-clock', { right: '16px', top: '16px' });
+  // The heart beside the torch (spec 24): a red heart pulsing at the heart rate, and the rate.
+  if (!document.getElementById('hud-heart-beat')) {
+    const style = document.createElement('style');
+    style.id = 'hud-heart-beat';
+    style.textContent = '@keyframes ofr-beat { 0% { transform: scale(1); } 12% { transform: scale(1.35); } 24% { transform: scale(1); } 36% { transform: scale(1.18); } 50%, 100% { transform: scale(1); } }';
+    document.head.appendChild(style);
+  }
+  const heart = corner('hud-heart', { left: '160px', bottom: '16px' });
+  const symbol = el('span', '', '♥');
+  Object.assign(symbol.style, { display: 'inline-block', color: '#c8302a', fontSize: '18px', marginRight: '6px', animation: 'ofr-beat 0.88s infinite', textShadow: '0 0 6px #7a0f0a' });
+  const rate = el('span', '', '68 bpm');
+  heart.append(symbol, rate);
   const candle = el('span');
   Object.assign(candle.style, { display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '30px', width: '10px', marginRight: '8px', verticalAlign: 'middle' });
   const flame = el('span');
@@ -42,6 +56,11 @@ export function createHud(options: { prompt: { show(text: string): void; hide():
   const time = el('span');
 
   return {
+    heart(bpm) {
+      heart.style.display = 'block';
+      symbol.style.animationDuration = `${(60 / bpm).toFixed(3)}s`;
+      rate.textContent = `${bpm} bpm`;
+    },
     clock(text, left) {
       if (!clock.contains(candle)) clock.replaceChildren(candle, time);
       clock.style.display = 'block';

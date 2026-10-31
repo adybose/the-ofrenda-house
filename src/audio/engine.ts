@@ -298,7 +298,8 @@ export class AudioEngine {
     if (this.tension > 0.02 && now >= this.nextBeat) {
       const bpm = 55 + 95 * this.tension;
       const at = Math.max(now, this.nextBeat);
-      this.play('heartbeat', { param: 0.3 + 0.7 * this.tension, gain: 0.4 + 0.6 * this.tension, delay: at - now });
+      // Clearly heard (spec 24): louder as fear rises.
+      this.play('heartbeat', { param: 0.3 + 0.7 * this.tension, gain: 0.6 + 0.9 * this.tension, delay: at - now });
       this.nextBeat = at + 60 / bpm;
     } else if (this.tension <= 0.02) {
       this.nextBeat = now;

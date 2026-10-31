@@ -10,7 +10,8 @@ import type { Interactions } from './interaction';
 declare module '../core/events' {
   interface GameEvents {
     interact: { id: string };
-    doorOpened: { doorId: DoorId };
+    /** `byPlayer`: the player opened it with E (spec 24's door scares), not La Sombra or a script. */
+    doorOpened: { doorId: DoorId; byPlayer?: boolean };
     doorClosed: { doorId: DoorId };
     doorUnlocked: { doorId: DoorId };
     doorLocked: { doorId: DoorId };
@@ -79,12 +80,12 @@ export class DoorController {
       if (door.keyId && this.options.hasKey(door.keyId)) {
         house.unlock(doorId);
         events.emit('doorUnlocked', { doorId });
-        this.setOpen(doorId, true);
+        this.setOpen(doorId, true, true);
       } else {
         events.emit('doorLocked', { doorId });
       }
     } else {
-      this.setOpen(doorId, door.state !== 'open');
+      this.setOpen(doorId, door.state !== 'open', true);
     }
   }
 
@@ -93,12 +94,13 @@ export class DoorController {
     this.setOpen(doorId, open);
   }
 
-  private setOpen(doorId: DoorId, open: boolean): void {
+  private setOpen(doorId: DoorId, open: boolean, byPlayer = false): void {
     if (!this.options.house.setDoorOpen(doorId, open)) return;
     const swing = this.swing.get(doorId) ?? { amount: open ? 0 : 1, target: 0 };
     swing.target = open ? 1 : 0;
     this.swing.set(doorId, swing);
-    events.emit(open ? 'doorOpened' : 'doorClosed', { doorId });
+    if (open) events.emit('doorOpened', byPlayer ? { doorId, byPlayer } : { doorId });
+    else events.emit('doorClosed', { doorId });
   }
 
   update(dt: number): void {

@@ -1,4 +1,4 @@
-import { Float32BufferAttribute, Group, Mesh, PlaneGeometry, type Scene } from 'three';
+import { Float32BufferAttribute, Group, Mesh, PlaneGeometry, Vector3, type Scene } from 'three';
 import type { AudioEngine } from '../audio/engine';
 import type { Speaker } from '../audio/voice';
 import type { CaseFile } from '../case/types';
@@ -20,8 +20,9 @@ import type { ChunkDiff } from '../world/types';
 import { CELL_SIZE, WALL_INSET, cellCentre, worldToCell } from '../world/units';
 import { DAWN_MINUTES, clockLabel, gameClock } from './flow';
 import type { Monologue } from './thoughts';
+import { PATRIARCH_LINES as WATCH_LINES, pickLine } from '../spirits/lines';
 
-export type ActStage = 'off' | 'title' | 'prologue' | 'entrance' | 'portraits' | 'chase' | 'cornered' | 'act2';
+export type ActStage = 'off' | 'title' | 'prologue' | 'entrance' | 'portraits' | 'reveal' | 'chase' | 'cornered' | 'act2';
 
 declare module '../core/events' {
   interface GameEvents {
@@ -36,7 +37,7 @@ declare module '../core/events' {
 
 declare global {
   interface Window {
-    __story?: { stage(): ActStage; clock(): string };
+    __story?: { stage(): ActStage; clock(): string; revealFrom(): [number, number] | undefined; patriarch(): [number, number] | undefined };
   }
 }
 
@@ -55,6 +56,11 @@ const FACES_SECONDS = 0.7;
 /** In Act 1 the patriarch never comes closer than this: he can't catch the player. */
 const KEEP_BACK = 1.8;
 const PATRIARCH_SPEED = 2.3;
+/** Spec 24: he comes out of his portrait at the player, to stop this close, over this long. */
+const REVEAL_CLOSE = 1;
+const REVEAL_SECONDS = 1.8;
+/** After Act 1 he keeps to his corridor, and speaks to a returning player at most this often. */
+const WATCH_GAP = 30;
 
 export interface StoryOptions {
   seed: number;
@@ -104,13 +110,19 @@ export class StoryFlow {
   private batDone = false;
   private shifted = false;
   private patriarch: Spirit | undefined;
-  private fadingOut = false;
   private elapsed = 0;
   private lastHour = 0;
   private dawned = false;
   private readonly faces: Mesh[] = [];
   private emptyFrame: Mesh | undefined;
   private readonly voice;
+  /** Where he came out from, behind his portrait (debug). */
+  private revealedFrom: [number, number] | undefined;
+  /** After Act 1: he stays in the corridor and speaks to a returning player (spec 24). */
+  private watching = false;
+  private lastRoom: string | undefined;
+  private lastSpoke = -Infinity;
+  private recentLines: string[] = [];
 
   constructor(private readonly options: StoryOptions) {
     this.voice = assignVoices(options.seed, options.caseFile.characters)[this.patriarchCharacter().id]!;
@@ -154,6 +166,16 @@ export class StoryFlow {
     this.showClock();
   }
 
+  /** Where the patriarch came out from, behind his portrait (debug). */
+  revealFrom(): [number, number] | undefined {
+    return this.revealedFrom;
+  }
+
+  /** Where the patriarch is now (debug). */
+  patriarchAt(): [number, number] | undefined {
+    return this.patriarch ? [this.patriarch.position.x, this.patriarch.position.z] : undefined;
+  }
+
   clockLabel(): string {
     const c = gameClock(this.elapsed);
     return clockLabel(c.hour, c.minute);
@@ -162,7 +184,10 @@ export class StoryFlow {
   update(dt: number, time: number): void {
     this.time += dt;
     this.patriarch?.update(time);
-    if (this.current === 'act2') return this.tickClock(dt);
+    if (this.current === 'act2') {
+      this.watch();
+      return this.tickClock(dt);
+    }
     const { player } = this.options;
     const p = player.state();
     const [x, y] = parseCell(worldToCell(p.x, p.z));
@@ -187,7 +212,7 @@ export class StoryFlow {
         this.batDone = true;
         this.options.scares.fire('bat', { x: cx, y: 2.8, z: cz }, { force: true });
       }
-      if (y >= 12 && inPortraitHall(x, y)) this.reveal();
+      if (y >= 10 && inPortraitHall(x, y)) void this.reveal();
     }
     if (this.current === 'chase') {
       this.follow(dt);
@@ -198,15 +223,7 @@ export class StoryFlow {
       }
       if (this.shifted && inCorridor(x, y) && y <= 3) void this.cornered();
     }
-    if (this.fadingOut && this.patriarch) {
-      this.patriarch.setFade(this.patriarch.fade - dt / 1.5);
-      if (this.patriarch.fade <= 0) {
-        this.patriarch.removeFromParent();
-        this.patriarch.dispose();
-        this.patriarch = undefined;
-        this.fadingOut = false;
-      }
-    } else if (this.patriarch && this.patriarch.fade < 1) {
+    if (this.patriarch && this.patriarch.fade < 1) {
       this.patriarch.setFade(this.patriarch.fade + dt / 0.8);
     }
   }
@@ -221,20 +238,60 @@ export class StoryFlow {
   }
 
   /** The portrait at the end of the hall is empty, and he is standing behind the player. */
-  private reveal(): void {
-    const { player, scene, seed } = this.options;
+  private async reveal(): Promise<void> {
+    if (this.current !== 'portraits') return;
+    this.enter('reveal');
+    const { player, scene, seed, audio, holdControls } = this.options;
+    holdControls(true);
     if (this.emptyFrame) this.emptyFrame.visible = true;
+    // He comes out through the wall behind his own portrait, at the end of the hall (spec 24)...
+    const [px, pz] = cellCentre('7,14');
+    const face = CELL_SIZE / 2 - WALL_INSET;
+    const from = new Vector3(px, 0, pz - face - 0.75);
     const p = player.state();
-    const [bx, bz] = [p.x + Math.sin(p.yaw) * 2, p.z + Math.cos(p.yaw) * 2];
+    const toPlayer = new Vector3(p.x - from.x, 0, p.z - from.z);
+    const distance = toPlayer.length();
+    // ...straight at the player, stopping a step from their face.
+    const to = from.clone().addScaledVector(toPlayer.normalize(), Math.max(0, distance - REVEAL_CLOSE));
+    this.revealedFrom = [from.x, from.z];
     const character = this.patriarchCharacter();
     const spirit = createSpirit(character, createRng(seed).fork(STREAMS.render).fork(`spirit:${character.id}`));
-    spirit.position.set(bx, 0, bz);
+    spirit.rotation.y = Math.atan2(p.x - from.x, p.z - from.z);
     scene.add(spirit);
     this.patriarch = spirit;
+    // The player turns to the empty frame, and what comes out of it.
+    player.teleport(p.x, p.z, Math.atan2(-(px - p.x), -(pz - face - p.z)));
+    audio.play('whisper', { position: [from.x, 1.7, from.z], gain: 1.2 });
+    events.emit('patriarchRevealed', {});
+    await spirit.drift(from, to, REVEAL_SECONDS);
     this.options.captions.line.show(character.name, PATRIARCH_LINES.who, 5);
-    void this.options.speaker.speak(PATRIARCH_LINES.who, this.voice, [bx, 1.7, bz]);
+    void this.options.speaker.speak(PATRIARCH_LINES.who, this.voice, [to.x, 1.7, to.z]);
+    await new Promise((resolve) => setTimeout(resolve, 900));
     this.options.captions.hint.show('', 'Run! Through the door on your left, at the end of the hall. Arrow keys move you; hold Shift to run.', 8);
+    holdControls(false);
     this.enter('chase');
+  }
+
+  /**
+   * After Act 1 he keeps to the corridor where it ended (spec 24); whenever the player comes back into
+   * it from the house, he turns to them and says something.
+   */
+  private watch(): void {
+    const spirit = this.patriarch;
+    if (!this.watching || !spirit) return;
+    const p = this.options.player.state();
+    spirit.rotation.y = Math.atan2(p.x - spirit.position.x, p.z - spirit.position.z);
+    const room = this.options.house.roomAt(worldToCell(p.x, p.z))?.id;
+    const cameBack = room === 'act1-corridor' && this.lastRoom !== undefined && this.lastRoom !== 'act1-corridor';
+    this.lastRoom = room;
+    if (!cameBack || this.time - this.lastSpoke < WATCH_GAP) return;
+    this.lastSpoke = this.time;
+    const picked = pickLine(WATCH_LINES, this.recentLines, createRng(this.options.seed).fork('patriarch-lines').fork(String(Math.round(this.time))));
+    this.recentLines = picked.recent;
+    const name = this.patriarchCharacter().name;
+    this.options.captions.line.show(name, picked.line, 5);
+    void this.options.speaker.speak(picked.line, this.voice, [spirit.position.x, 1.7, spirit.position.z]);
+    events.emit('patriarchSpoke', { line: picked.line });
   }
 
   /** He comes after the player, but never close enough to catch them. */
@@ -271,7 +328,13 @@ export class StoryFlow {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     await dialogue.say({ speaker: this.patriarchCharacter().name, line: PATRIARCH_LINES.another, voice: this.voice });
     dialogue.close();
-    this.fadingOut = true;
+    // He stays in his corridor from now on, a little way up from the dead end (spec 24).
+    if (this.patriarch) {
+      const [wx, wz] = cellCentre('2,6');
+      this.patriarch.position.set(wx, 0, wz);
+      this.watching = true;
+      this.lastRoom = 'act1-corridor';
+    }
     audio.play('clock', { param: 12 });
     house.endAct1();
     holdControls(false);
