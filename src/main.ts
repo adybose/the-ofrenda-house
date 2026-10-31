@@ -443,7 +443,20 @@ async function startGame(): Promise<void> {
   });
   // Finding the spirits (spec 23): whispers from the way to the nearest one not yet met.
   const guideEvery = Number(url.searchParams.get('guide') ?? 0) || undefined;
-  const guide = new Guide({ seed, house, audio, player, resolved: (id) => encounters!.isResolved(id), keys, every: guideEvery });
+  const guide = new Guide({
+    seed,
+    house,
+    audio,
+    player,
+    resolved: (id) => encounters!.isResolved(id),
+    keys,
+    // Keys a solved spirit left on its stand, not yet picked up: `stand:<room id>`.
+    keysWaiting: () =>
+      Object.entries(items.snapshot().tableKeys)
+        .filter(([, ids]) => ids.length)
+        .map(([stand]) => stand.slice('stand:'.length)),
+    every: guideEvery,
+  });
 
   // Dawn (spec 22): the patriarch's last question at six.
   dawn = new Dawn({

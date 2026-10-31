@@ -21,3 +21,18 @@ test('a whisper comes from the way to a spirit the player can reach, and the str
   // After the first thought of the night, the stranger notices the whispers.
   await expect(page.locator('#thought')).toHaveText('Whispers… from that way. Someone is waiting there.', { timeout: 12_000 });
 });
+
+test('with keys in hand the whispers keep coming, to the locked rooms too (fixed 31 October)', async ({ page }) => {
+  test.setTimeout(45_000);
+  await page.goto('/?seed=42&skip=act1&debug=hooks,encounter&mute=1&shadow=0&guide=3');
+  await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__encounter));
+  const locked = await page.evaluate(() => window.__encounter!.keyRooms().filter((k) => k.locked));
+  expect(locked.length).toBeGreaterThan(0);
+  await page.evaluate((ids) => ids.forEach((id) => window.__ofrenda!.giveKey(id)), locked.map((k) => k.keyId));
+  await page.waitForTimeout(14_000);
+  const log = await page.evaluate(() => window.__ofrenda!.events());
+  const whispers = log.filter((e) => e.name === 'guideWhisper');
+  console.log(`whispers to: ${whispers.map((w) => w.characterId).join(', ')}; locked: ${locked.map((k) => k.characterId).join(', ')}`);
+  expect(whispers.length).toBeGreaterThanOrEqual(3);
+  expect(log.filter((e) => e.name === 'guideSkipped')).toEqual([]);
+});
