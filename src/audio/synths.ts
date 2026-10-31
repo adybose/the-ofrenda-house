@@ -801,7 +801,8 @@ export function laugh(s: SynthContext): number {
   const count = 7;
   const step = 0.22;
   const length = count * step;
-  const pitch = 0.95 + s.rng.float() * 0.1;
+  // param (spec 24): a pitch scale, so La Sombra can laugh far deeper than the spirits.
+  const pitch = (s.param > 0 ? s.param : 1) * (0.95 + s.rng.float() * 0.1);
   const steps = 64;
   const curve = Float32Array.from({ length: steps }, (_, i) => {
     const x = i / (steps - 1);

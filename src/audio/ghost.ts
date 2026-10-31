@@ -9,6 +9,8 @@ import type { Vec3 } from './engine';
 
 /** The whole chain's level: Piper normalises speech near full scale, and the echo adds to it. */
 const LEVEL = 0.6;
+/** How much louder La Sombra speaks than a spirit. */
+const SHADOW_LOUDER = 2;
 
 function delayLine(ctx: BaseAudioContext, input: AudioNode, out: AudioNode, seconds: number, feedback: number, tone: number, level: number): void {
   const delay = ctx.createDelay(1);
@@ -70,7 +72,8 @@ export function ghostVoice(ctx: BaseAudioContext, buffer: AudioBuffer, voice: Vo
   source.buffer = buffer;
   source.playbackRate.value = voice.pitch;
   const level = ctx.createGain();
-  level.gain.value = LEVEL;
+  // La Sombra speaks louder than the spirits (spec 24).
+  level.gain.value = voice.shadow ? LEVEL * SHADOW_LOUDER : LEVEL;
   if (position) {
     const panner = ctx.createPanner();
     panner.panningModel = 'HRTF';

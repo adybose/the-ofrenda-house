@@ -357,6 +357,7 @@ async function startGame(): Promise<void> {
     caption: createCaption(),
     suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
     onTension: (level) => fear.hold(level),
+    alwaysAmbush: url.searchParams.get('sombra') === 'door',
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
   events.on('caughtByShadow', () => {

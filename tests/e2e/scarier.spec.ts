@@ -60,3 +60,65 @@ test('opening a door startles bats, and they bring the chandelier down in front 
   expect(ahead).toBeGreaterThan(1.8);
   await page.screenshot({ path: 'artifacts/screenshots/24-door-chandelier.png' });
 });
+
+/** A closed door between two rooms near the start, and the side to stand on. */
+async function closedDoor(page: Page) {
+  return page.evaluate(() => {
+    const house = window.__ofrenda!.house;
+    for (const chunk of house.loadedChunks()) {
+      for (const d of chunk.doors) {
+        if (d.state !== 'closed' || !house.roomAt(d.a) || !house.roomAt(d.b) || d.id === 'front-door') continue;
+        if (house.keyRooms().some((k) => k.doorId === d.id)) continue;
+        return { id: d.id, side: 'a' as const };
+      }
+    }
+    return undefined;
+  });
+}
+
+const shadowMode = (page: Page) => page.evaluate(() => window.__shadow!.mode());
+
+test('La Sombra steps out as a door opens: in the torchlight it laughs, speaks and flees', async ({ page }) => {
+  await open(page, 'debug=hooks,shadow&sombra=door');
+  const door = (await closedDoor(page))!;
+  await page.evaluate(({ id, side }) => window.__ofrenda!.standFacingDoor(id, side), door);
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('KeyE');
+  await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'shadowLaughed'), { timeout: 5000, intervals: [50] }).toBe(true);
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: 'artifacts/screenshots/24-sombra-door.png' });
+  await expect(page.locator('#caption')).toContainText('La Sombra:');
+  const near = (await page.evaluate(() => window.__shadow!.distance()))!;
+  await page.waitForTimeout(1200);
+  const later = await page.evaluate(() => window.__shadow!.distance());
+  // It flees: further away, or already gone.
+  expect(later === null || later > near + 1).toBe(true);
+});
+
+test('La Sombra steps out as a door opens: in the dark it charges', async ({ page }) => {
+  await open(page, 'debug=hooks,shadow&sombra=door');
+  const door = (await closedDoor(page))!;
+  await page.evaluate(({ id, side }) => window.__ofrenda!.standFacingDoor(id, side), door);
+  await page.waitForTimeout(300);
+  await page.keyboard.press('KeyE');
+  await expect.poll(() => shadowMode(page), { timeout: 5000 }).toBe('chasing');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'artifacts/screenshots/24-sombra-eyes.png' });
+  const first = (await page.evaluate(() => window.__shadow!.distance()))!;
+  await page.waitForTimeout(800);
+  expect((await page.evaluate(() => window.__shadow!.distance())) ?? 0).toBeLessThan(first);
+});
+
+test('when the light goes out, the darkness draws La Sombra, and it says so', async ({ page }) => {
+  test.setTimeout(45_000);
+  await open(page, 'debug=hooks,shadow');
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('KeyF');
+  await expect(page.locator('#caption')).toContainText('La Sombra:', { timeout: 14_000 });
+  const words = (await page.locator('#caption').textContent())!.replace('La Sombra: ', '');
+  const dark = ['I can see your darkness.', 'I can smell your fear.', 'Your light is gone. I am not.', 'In the dark, you are mine.', 'Do you hear me breathing? I hear you.', 'Darkness suits you, little thief.', 'No flame now. Only me.', 'The dark is my house too.', 'Your heart is so loud in the dark.', 'There you are. I knew you would come to me.', 'Shh. Let the dark hold you.', 'Every shadow is my hand.'];
+  expect(dark).toContain(words);
+  expect(['hunting', 'chasing']).toContain(await shadowMode(page));
+});

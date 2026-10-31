@@ -21,5 +21,15 @@ export const SHADOW_TAUNTS: readonly string[] = [
   "The house is hungry tonight.",
   "Do not trust the ones who smile.",
   "I hear you breathing behind the door.",
-  "Every step creaks. I hear them all."
+  "Every step creaks. I hear them all.",
+  "Faster. You are almost interesting.",
+  "Your torch flickers. I count the seconds.",
+  "Behind you. Always behind you.",
+  "The walls move for me, not for you.",
+  "Your breath gives you away.",
+  "I wore a face once. Shall I wear yours?",
+  "No one is coming for you.",
+  "You run like the others ran.",
+  "This corridor ends. They all do.",
+  "Let go of the light. It is easier."
 ];
