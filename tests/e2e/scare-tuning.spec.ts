@@ -19,3 +19,68 @@ test('a jump scare brings the suspense score in', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioLevels().score.drone), { timeout: 5000 }).toBeGreaterThan(0.02);
   await expect.poll(() => page.evaluate(() => window.__ofrenda!.audioLevels().score.strings), { timeout: 5000 }).toBeGreaterThan(0.002);
 });
+
+test('bats from an opened door fly straight into the player’s face', async ({ page }) => {
+  await open(page, 'debug=hooks,scares&shadow=0&doorscare=bats');
+  const door = await page.evaluate(() => {
+    const house = window.__ofrenda!.house;
+    for (const chunk of house.loadedChunks()) {
+      for (const d of chunk.doors) {
+        if (d.state !== 'closed' || !house.roomAt(d.a) || !house.roomAt(d.b) || d.id === 'front-door') continue;
+        if (house.keyRooms().some((k) => k.doorId === d.id)) continue;
+        return { id: d.id, side: 'a' as const };
+      }
+    }
+    return undefined;
+  });
+  expect(door).toBeDefined();
+  await page.evaluate(({ id, side }) => window.__ofrenda!.standFacingDoor(id, side), door!);
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__scares!.closestBat());
+  await page.keyboard.press('KeyE');
+  // Keeps the frame from the moment it is closest.
+  let closest = Infinity;
+  for (let i = 0; i < 20 && closest >= 0.6; i++) {
+    const shot = await page.screenshot();
+    closest = Math.min(closest, await page.evaluate(() => window.__scares!.closestBat()));
+    if (closest < 0.6) (await import('node:fs')).writeFileSync('artifacts/screenshots/25-bat-in-face.png', shot);
+  }
+  console.log(`closest bat: ${closest.toFixed(2)} m`);
+  expect(closest).toBeLessThan(0.6);
+});
+
+test('La Sombra brings down the chandelier of the room ahead, in front of the player', async ({ page }) => {
+  await open(page, 'debug=hooks,shadow&shadow=0');
+  // A spot in a room 3 to 4.5 m from its chandelier, facing it.
+  const spot = await page.evaluate(() => {
+    const house = window.__ofrenda!.house;
+    const centre = (x: number, y: number) => [(x + 0.5) * 1.5, -(y + 0.5) * 1.5] as const;
+    for (const room of house.loadedChunks().flatMap((c) => c.rooms)) {
+      const anchor = room.anchors.find((a) => a.kind === 'chandelier');
+      if (!anchor) continue;
+      const [cx, cy] = anchor.cell.split(',').map(Number) as [number, number];
+      for (const [dx, dy] of [[0, 3], [0, -3], [3, 0], [-3, 0], [0, 2], [0, -2], [2, 0], [-2, 0]] as [number, number][]) {
+        if (!room.cells.includes(`${cx + dx},${cy + dy}`)) continue;
+        const [px, pz] = centre(cx + dx, cy + dy);
+        const [tx, tz] = centre(cx, cy);
+        return { x: px, z: pz, yaw: Math.atan2(-(tx - px), -(tz - pz)), chandelier: [tx, tz] };
+      }
+    }
+    return undefined;
+  });
+  expect(spot).toBeDefined();
+  await page.evaluate(({ x, z, yaw }) => window.__ofrenda!.place(x, z, yaw), spot!);
+  await page.evaluate(() => window.__ofrenda!.frames(3));
+  await page.keyboard.press('KeyF');
+  expect(await page.evaluate(() => window.__shadow!.hazard('crash'))).toBe(true);
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: 'artifacts/screenshots/25-sombra-chandelier.png' });
+  await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'chandelierFell'), { timeout: 3000 }).toBe(true);
+  const fell = (await page.evaluate(() => window.__ofrenda!.events())).find((e) => e.name === 'chandelierFell')!;
+  const [fx, , fz] = fell.position as [number, number, number];
+  expect(Math.hypot(fx - spot!.chandelier[0]!, fz - spot!.chandelier[1]!)).toBeLessThan(0.1);
+  const d = Math.hypot(fx - spot!.x, fz - spot!.z);
+  expect(d).toBeGreaterThanOrEqual(2);
+  expect(d).toBeLessThanOrEqual(5.5);
+});
