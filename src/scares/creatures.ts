@@ -16,7 +16,9 @@ import type { ScareKind } from './scheduler';
 // The scares' creatures (spec 13): a bat, a rat and a cat, low-poly, built and animated in code.
 // They are lit like the rest of the house, so they show in the torch beam; the cat's eyes glow.
 
-const fur = new MeshLambertMaterial({ color: 0x3a302a });
+// Black bats (spec 24).
+const fur = new MeshLambertMaterial({ color: 0x0e0c0b });
+const wingSkin = new MeshLambertMaterial({ color: 0x151112, side: 2 });
 const ratFur = new MeshLambertMaterial({ color: 0x4a4038 });
 const skin = new MeshLambertMaterial({ color: 0x6a4a44, side: 2 });
 const catFur = new MeshLambertMaterial({ color: 0x242120 });
@@ -50,8 +52,8 @@ function bat(): Creature {
   const body = mesh(new SphereGeometry(0.06, 6, 4).scale(1, 0.8, 1.6), fur);
   const left = new Group();
   const right = new Group();
-  left.add(mesh(wing(-1), skin));
-  right.add(mesh(wing(1), skin));
+  left.add(mesh(wing(-1), wingSkin));
+  right.add(mesh(wing(1), wingSkin));
   const ears = [-1, 1].map((s) => mesh(new ConeGeometry(0.018, 0.05, 4), fur, s * 0.025, 0.06, -0.06));
   group.add(body, left, right, ...ears);
   // A big one: a wingspan of about a metre.

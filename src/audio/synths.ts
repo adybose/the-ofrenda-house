@@ -552,36 +552,46 @@ export function clock(s: SynthContext): number {
 // ---- Scares ----
 
 export function stinger(s: SynthContext): number {
-  // A dissonant cluster of strings that swells, with a scraping screech on top.
-  const sweep = filter(s, 'lowpass', 300, 2);
-  sweep.frequency.setValueAtTime(300, s.t);
-  sweep.frequency.exponentialRampToValueAtTime(4200, s.t + 0.35);
-  sweep.frequency.exponentialRampToValueAtTime(800, s.t + 3.2);
+  // A movie stinger (spec 24): a high, screeching string cluster that hits all at once, bowed in a
+  // fast tremolo and sliding up, with a bright scrape on the attack and a low boom under it.
+  const length = 2.5;
+  const bright = filter(s, 'lowpass', 9000, 0.8);
+  bright.frequency.setValueAtTime(9000, s.t);
+  bright.frequency.exponentialRampToValueAtTime(3500, s.t + length);
   const g = gain(s);
   g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(0.42, s.t + 0.05);
-  g.gain.setValueAtTime(0.42, s.t + 1);
-  g.gain.exponentialRampToValueAtTime(0.18, s.t + 2.3);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + 3.6);
-  chain(sweep, g, s.out);
-  for (const f of [233, 247, 277, 311, 466, 494]) {
+  g.gain.exponentialRampToValueAtTime(0.5, s.t + 0.012);
+  g.gain.setValueAtTime(0.5, s.t + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.16, s.t + 1.2);
+  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
+  chain(bright, g, s.out);
+  // Semitones and tritones high in the violins' register: A#5 B5 C6 F6 F#6 A#6.
+  for (const f of [932, 988, 1047, 1397, 1480, 1865]) {
     const osc = s.ctx.createOscillator();
     osc.type = 'sawtooth';
-    osc.frequency.value = f * (1 + (s.rng.float() - 0.5) * 0.01);
-    const vibrato = s.ctx.createOscillator();
-    vibrato.frequency.value = 5 + s.rng.float() * 3;
-    const depth = gain(s, f * 0.012);
-    chain(vibrato, depth);
-    depth.connect(osc.frequency);
-    const each = gain(s, 0.22);
-    chain(osc, each, sweep);
+    const start = f * (1 + (s.rng.float() - 0.5) * 0.012);
+    osc.frequency.setValueAtTime(start, s.t);
+    // Sliding up about three semitones as the bows dig in.
+    osc.frequency.exponentialRampToValueAtTime(start * 1.19, s.t + 0.45);
+    const bow = gain(s, 0.075);
+    // A fast, uneven tremolo, as of many bows at once.
+    const tremolo = s.ctx.createOscillator();
+    tremolo.frequency.value = 12 + s.rng.float() * 5;
+    const depth = gain(s, 0.05);
+    chain(tremolo, depth);
+    depth.connect(bow.gain);
+    chain(osc, bow, bright);
     osc.start(s.t);
-    vibrato.start(s.t);
-    osc.stop(s.t + 3.7);
-    vibrato.stop(s.t + 3.7);
+    tremolo.start(s.t);
+    osc.stop(s.t + length + 0.05);
+    tremolo.stop(s.t + length + 0.05);
   }
-  burst(s, s.t, 'white', 'highpass', 3200, 0.18, 1);
-  return 3.7;
+  // The scrape of the attack, and a low boom underneath.
+  burst(s, s.t, 'white', 'highpass', 2600, 0.32, 0.18);
+  burst(s, s.t, 'white', 'bandpass', 5200, 0.2, 0.4, 2);
+  tone(s, s.t, 62, 34, 0.55, 0.004, 0.7);
+  burst(s, s.t, 'brown', 'lowpass', 180, 0.4, 0.5);
+  return length + 0.1;
 }
 
 const WHISPER_LEVEL = 1.6;
