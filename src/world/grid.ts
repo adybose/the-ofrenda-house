@@ -15,6 +15,8 @@ export const MAX_LOADED_CHUNKS = (2 * UNLOAD_RADIUS + 1) ** 2;
 export const KEY_ROOM_REACH = 14;
 /** Key rooms are never placed closer than this, so they stay hidden among filler rooms. */
 export const KEY_ROOM_MIN_DISTANCE = 3;
+/** Spec 23: a key room is placed this many doors from the player where it can be, so spirits are a short walk apart. */
+export const KEY_ROOM_BAND = [5, 7] as const;
 /** Chunks within this many of the player's chunk can be reshuffled. */
 export const RESHUFFLE_RADIUS = 2;
 
@@ -33,6 +35,8 @@ export const ACT1_EXIT_EDGE = '-1,0:E';
 export const ACT1_BACK_EDGE = '0,2:E';
 /** The middle of the entrance hall. */
 export const START_CELL: CellId = '7,2';
+/** Where Act 2 begins: the end of the Act 1 corridor, beside the sealed way into the house. */
+export const ACT2_START_CELL: CellId = '1,2';
 
 export const cellId = (x: number, y: number): CellId => `${x},${y}`;
 export const slotKey = (sx: number, sy: number): SlotKey => `${sx},${sy}`;

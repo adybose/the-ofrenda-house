@@ -98,6 +98,55 @@ describe('visited key rooms', () => {
   }, 60_000);
 });
 
+describe('spirit rooms a short walk away (spec 23)', () => {
+  it('are mostly placed 5 to 7 doors from the player, and brought back within 7 when they drift (200 seeds)', () => {
+    let placed = 0;
+    let inBand = 0;
+    let checks = 0;
+    let near = 0;
+    let nearish = 0;
+    const doorsTo = (house: ReturnType<typeof newHouse>, from: CellId) => house.distancesFrom(from, 14);
+    for (let seed = 0; seed < 200; seed++) {
+      const house = newHouse(seed);
+      const rng = createRng(seed).fork('band-test');
+      let player: CellId = '1,2';
+      let where = new Map(house.keyRooms().map((k) => [k.characterId, k.roomId && house.getRoom(k.roomId)?.cells[0]]));
+      const count = (from: CellId, moved: (id: string) => boolean) => {
+        const d = doorsTo(house, from);
+        for (const k of house.keyRooms()) {
+          if (!moved(k.characterId) || !k.roomId) continue;
+          placed++;
+          const doors = d.get(k.roomId);
+          if (doors !== undefined && doors >= 5 && doors <= 7) inBand++;
+        }
+      };
+      count(player, () => true);
+      for (let i = 0; i < 30; i++) {
+        player = wander(house, rng, player, 3);
+        const here = house.roomAt(player);
+        if (here?.kind === 'key' && here.characterId) house.markVisited(here.characterId);
+        const visible = visibleAround(house, player, 2);
+        house.reshuffle(visible, player);
+        const now = new Map(house.keyRooms().map((k) => [k.characterId, k.roomId && house.getRoom(k.roomId)?.cells[0]]));
+        count(player, (id) => now.get(id as never) !== where.get(id as never));
+        where = now;
+        const d = doorsTo(house, player);
+        for (const k of house.keyRooms()) {
+          if (k.visited || !k.roomId) continue;
+          const cells = house.getRoom(k.roomId)?.cells ?? [];
+          if (cells.some((c) => visible.has(c))) continue;
+          checks++;
+          if ((d.get(k.roomId) ?? Infinity) <= 7) near++;
+          if ((d.get(k.roomId) ?? Infinity) <= 9) nearish++;
+        }
+      }
+    }
+    expect(inBand / placed, `${inBand}/${placed} placed 5-7 doors away`).toBeGreaterThanOrEqual(0.75);
+    expect(near / checks, `${near}/${checks} within 7 doors after reshuffles`).toBeGreaterThanOrEqual(0.85);
+    expect(nearish / checks, `${nearish}/${checks} within 9 doors after reshuffles`).toBeGreaterThanOrEqual(0.95);
+  }, 120_000);
+});
+
 describe('the front door', () => {
   it('stays sealed until unsealFrontDoor()', () => {
     const house = newHouse(42);
