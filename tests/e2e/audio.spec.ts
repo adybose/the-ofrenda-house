@@ -72,7 +72,7 @@ test('the grandfather clock ticks while the player is in its room, and stops out
   await expect.poll(() => page.evaluate(() => window.__ofrenda!.ticking())).toBe(true);
 });
 
-test('the rain stands well above the wind, overhead thunder opens with a loud crack, the stinger hits high and bright', async ({ page }) => {
+test('the rain stands well above the wind, overhead thunder opens with a loud crack, the stinger is a heavy piano slam', async ({ page }) => {
   await page.goto('/?seed=42&debug=hooks&mute=1');
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
   const render = (name: string, param?: number) =>
@@ -83,12 +83,14 @@ test('the rain stands well above the wind, overhead thunder opens with a loud cr
   // The first half second of a close strike: was 0.31 when it opened with a faint clap.
   const overhead = await render('thunder', 0.95);
   expect(overhead.onsetRms).toBeGreaterThan(0.45);
-  // The stinger (spec 24): a high movie hit, bright and sudden, ringing out over a second or two.
+  // The stinger (spec 25): a low piano cluster slammed down, heavy, loudest at once, ringing out.
   const stinger = await render('stinger');
-  expect(stinger.centroid).toBeGreaterThan(1800);
+  expect((stinger.lowRms / stinger.rms) ** 2, 'share of energy under 150 Hz').toBeGreaterThan(0.4);
+  const loudest = stinger.envelope.indexOf(Math.max(...stinger.envelope));
+  expect(loudest * 0.05, 'loudest at the attack').toBeLessThan(0.25);
   expect(stinger.onsetRms).toBeGreaterThan(0.05);
-  expect(stinger.audibleFor).toBeGreaterThan(1.2);
-  expect(stinger.audibleFor).toBeLessThan(3);
+  expect(stinger.audibleFor).toBeGreaterThan(2.5);
+  expect(stinger.audibleFor).toBeLessThan(6);
 });
 
 test('overhead thunder fades gradually and long; the slam is a short, sharp wooden thud', async ({ page }) => {

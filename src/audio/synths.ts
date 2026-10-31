@@ -551,47 +551,39 @@ export function clock(s: SynthContext): number {
 
 // ---- Scares ----
 
-export function stinger(s: SynthContext): number {
-  // A movie stinger (spec 24): a high, screeching string cluster that hits all at once, bowed in a
-  // fast tremolo and sliding up, with a bright scrape on the attack and a low boom under it.
-  const length = 2.5;
-  const bright = filter(s, 'lowpass', 9000, 0.8);
-  bright.frequency.setValueAtTime(9000, s.t);
-  bright.frequency.exponentialRampToValueAtTime(3500, s.t + length);
-  const g = gain(s);
-  g.gain.setValueAtTime(0.0001, s.t);
-  g.gain.exponentialRampToValueAtTime(0.5, s.t + 0.012);
-  g.gain.setValueAtTime(0.5, s.t + 0.35);
-  g.gain.exponentialRampToValueAtTime(0.16, s.t + 1.2);
-  g.gain.exponentialRampToValueAtTime(0.0001, s.t + length);
-  chain(bright, g, s.out);
-  // Semitones and tritones high in the violins' register: A#5 B5 C6 F6 F#6 A#6.
-  for (const f of [932, 988, 1047, 1397, 1480, 1865]) {
+/**
+ * One hammered piano string (spec 25): stretched, slightly inharmonic partials, the higher ones
+ * dying faster, with the felt hammer's thump on the attack.
+ */
+function pianoNote(s: SynthContext, at: number, f: number, level: number, ring: number): void {
+  for (let n = 1; n <= 10; n++) {
+    const partial = f * n * Math.sqrt(1 + 0.0004 * n * n);
+    if (partial > 9000) break;
     const osc = s.ctx.createOscillator();
-    osc.type = 'sawtooth';
-    const start = f * (1 + (s.rng.float() - 0.5) * 0.012);
-    osc.frequency.setValueAtTime(start, s.t);
-    // Sliding up about three semitones as the bows dig in.
-    osc.frequency.exponentialRampToValueAtTime(start * 1.19, s.t + 0.45);
-    const bow = gain(s, 0.075);
-    // A fast, uneven tremolo, as of many bows at once.
-    const tremolo = s.ctx.createOscillator();
-    tremolo.frequency.value = 12 + s.rng.float() * 5;
-    const depth = gain(s, 0.05);
-    chain(tremolo, depth);
-    depth.connect(bow.gain);
-    chain(osc, bow, bright);
-    osc.start(s.t);
-    tremolo.start(s.t);
-    osc.stop(s.t + length + 0.05);
-    tremolo.stop(s.t + length + 0.05);
+    osc.frequency.value = partial * (1 + (s.rng.float() - 0.5) * 0.002);
+    const g = gain(s);
+    const decay = ring / (1 + 0.45 * (n - 1));
+    pluck(g.gain, at, level / n ** 0.9, 0.004, decay);
+    chain(osc, g, s.out);
+    osc.start(at);
+    osc.stop(at + decay + 0.05);
   }
-  // The scrape of the attack, and a low boom underneath.
-  burst(s, s.t, 'white', 'highpass', 2600, 0.32, 0.18);
-  burst(s, s.t, 'white', 'bandpass', 5200, 0.2, 0.4, 2);
-  tone(s, s.t, 62, 34, 0.55, 0.004, 0.7);
-  burst(s, s.t, 'brown', 'lowpass', 180, 0.4, 0.5);
-  return length + 0.1;
+  burst(s, at, 'pink', 'bandpass', Math.min(2500, f * 4), level * 0.5, 0.015, 1.2);
+}
+
+/** The cluster both hands slam down: C1 C2 C#2 F#2 C3 C#3 F#3. */
+const SLAM_CHORD = [32.7, 65.41, 69.3, 92.5, 130.81, 138.59, 185];
+
+export function stinger(s: SynthContext): number {
+  // A movie stinger (spec 25): both hands crash down on a low, dissonant piano cluster and let it
+  // ring, with a softer rebound hit just after, as a pianist's slam bounces.
+  const ring = 4;
+  for (const f of SLAM_CHORD) pianoNote(s, s.t, f, 0.1, ring);
+  for (const f of SLAM_CHORD.slice(1)) pianoNote(s, s.t + 0.18, f, 0.04, ring * 0.7);
+  // The weight of the low strings and the frame, under the hit.
+  tone(s, s.t, 49, 30, 0.27, 0.004, 1.2);
+  burst(s, s.t, 'brown', 'lowpass', 160, 0.3, 0.6);
+  return ring + 0.3;
 }
 
 const WHISPER_LEVEL = 1.6;
