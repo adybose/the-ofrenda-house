@@ -172,6 +172,19 @@ export class ItemsController {
     this.dispatch({ type: 'blowOut' });
   }
 
+  /** Spec 26: La Sombra's gust puts out every flame about the player in `cell`: in hand and standing in the room. */
+  gust(cell: CellId): void {
+    const room = this.options.house.roomAt(cell);
+    this.dispatch({ type: 'gust', standIds: room ? standsOf(room).map((s) => s.id) : [] });
+  }
+
+  /** Spec 26: the player has light, but only flame a gust could blow out: the torch off, and not in a sanctuary. */
+  flameOnly(flashlightLit: boolean, cell: CellId): boolean {
+    if (flashlightLit) return false;
+    const room = this.options.house.roomAt(cell);
+    return !(room && this.isSanctuary(room.id)) && this.inLight(false, cell);
+  }
+
   /** A spirit set at peace: the candle beneath its portrait lights by itself. */
   spiritSolved(characterId: CharacterId): void {
     this.dispatch({ type: 'spiritSolved', characterId });

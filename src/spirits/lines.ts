@@ -37,6 +37,18 @@ export const FLEE_LINES: readonly string[] = [
   'You cannot carry that light forever.',
 ];
 
+/** Spec 26: as it blows out the player's flame, or takes hold of them in the dark. */
+export const GRASP_LINES: readonly string[] = [
+  'Too close, little thief.',
+  'Now you are mine.',
+  'Your flame is gone. So are you.',
+  'You walked right into my arms.',
+  'Shh. Let me in.',
+  'Come here.',
+  'No light left. Only me.',
+  'I have you now.',
+];
+
 /** The patriarch, to a player who comes back into his corridor after Act 1. */
 export const PATRIARCH_LINES: readonly string[] = [
   'Still here? The candle burns, stranger.',

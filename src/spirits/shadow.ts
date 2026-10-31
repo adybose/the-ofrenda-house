@@ -47,12 +47,25 @@ export function ambushOdds(threat: number, byCandle: boolean): { chance: number;
   return byCandle ? { chance: AMBUSH.candleChance, gap: AMBUSH.candleGap } : { chance: AMBUSH.chance + AMBUSH.perThreat * threat, gap: AMBUSH.gap };
 }
 
-export type ShadowMode = 'dormant' | 'stalking' | 'hunting' | 'confronting' | 'chasing' | 'withdrawn' | 'lost' | 'caught';
+/**
+ * Spec 26: walk at it by flame alone (`reach` m, closing at `approach` m/s, or within `tooClose` m)
+ * and a gust blows the flames out; it lunges at `lunge` m/s to `hold` m from the eyes, and the player
+ * has `grace` seconds to light up before they are caught.
+ */
+export const GRASP = { reach: 2.5, approach: 0.5, tooClose: 1.2, grace: 1.5, lunge: 5, hold: 0.8 } as const;
+
+/** Whether it blows out a player's flames: only flames (`flameOnly`: the torch off, not in a sanctuary), and only up close. */
+export function blowsOut(where: { distance: number; approach: number; flameOnly: boolean; inLight: boolean }): boolean {
+  if (!where.inLight || !where.flameOnly) return false;
+  return where.distance <= GRASP.tooClose || (where.distance <= GRASP.reach && where.approach >= GRASP.approach);
+}
+
+export type ShadowMode = 'dormant' | 'stalking' | 'hunting' | 'confronting' | 'chasing' | 'grasping' | 'withdrawn' | 'lost' | 'caught';
 
 /** Modes in which the figure is in the house, moving. */
-export const PRESENT: ReadonlySet<ShadowMode> = new Set(['hunting', 'confronting', 'chasing']);
+export const PRESENT: ReadonlySet<ShadowMode> = new Set(['hunting', 'confronting', 'chasing', 'grasping']);
 
-export type ShadowEmit = 'appear' | 'ambush' | 'vanish' | 'whisper' | 'laugh' | 'threaten' | 'taunt' | 'darkLine' | 'caught';
+export type ShadowEmit = 'appear' | 'ambush' | 'vanish' | 'whisper' | 'laugh' | 'threaten' | 'taunt' | 'darkLine' | 'gust' | 'grab' | 'repelled' | 'caught';
 
 export interface ShadowState {
   mode: ShadowMode;
@@ -74,7 +87,8 @@ export interface ShadowState {
 
 export type ShadowEvent =
   | { type: 'enable' }
-  | { type: 'tick'; dt: number; sees: boolean; distance: number; inLight: boolean; suppressed: boolean }
+  /** `flameOnly`: the player's light is flame a gust can blow out; `approach`: their speed towards it, m/s (spec 26). */
+  | { type: 'tick'; dt: number; sees: boolean; distance: number; inLight: boolean; suppressed: boolean; flameOnly: boolean; approach: number }
   | { type: 'riddleFailed' }
   | { type: 'wrongName' }
   | { type: 'hourPassed' }
@@ -96,7 +110,7 @@ export function speedFor(threat: number, mode: ShadowMode): number {
   return 0;
 }
 
-/** It can only catch a player who is in the dark. */
+/** It can only seize a player who is in the dark. */
 export function canCatch(distance: number, inLight: boolean): boolean {
   return !inLight && distance <= SHADOW.catchDistance;
 }
@@ -129,6 +143,12 @@ export function shadowReducer(state: ShadowState, event: ShadowEvent): ShadowSta
   }
 
   const { dt, sees, distance, inLight, suppressed } = event;
+  const withdraw = (emits: ShadowEmit[]) => {
+    const [min, max] = SHADOW.withdrawSeconds;
+    const away = min + createRng(state.seed).fork(`withdraw:${state.draws}`).float() * (max - min);
+    return enter('withdrawn', emits, { away, draws: state.draws + 1 });
+  };
+  const gust = () => enter('grasping', ['gust']);
   const time = state.modeTime + dt;
   if (state.mode === 'dormant' || state.mode === 'caught') return next({});
   // Encounters, the journal and the like: it slips away and keeps quiet.
@@ -141,22 +161,25 @@ export function shadowReducer(state: ShadowState, event: ShadowEvent): ShadowSta
       return next({ modeTime: time });
     }
     case 'hunting':
+      if (sees && blowsOut(event)) return gust();
       if (sees) return inLight ? enter('confronting', ['laugh', 'threaten']) : enter('chasing', ['taunt'], { nextTaunt: SHADOW.tauntSeconds });
       if (time >= SHADOW.huntGiveUp) return stalk(['vanish']);
       return next({ modeTime: time });
-    case 'confronting': {
+    case 'confronting':
+      if (blowsOut(event)) return gust();
       if (time < SHADOW.confrontSeconds) return next({ modeTime: time });
-      const [min, max] = SHADOW.withdrawSeconds;
-      const away = min + createRng(state.seed).fork(`withdraw:${state.draws}`).float() * (max - min);
-      return enter('withdrawn', ['vanish'], { away, draws: state.draws + 1 });
-    }
+      return withdraw(['vanish']);
+    case 'grasping':
+      // A light thrown up in time (the torch, or a match) drives it off; otherwise it takes them.
+      if (inLight) return withdraw(['laugh', 'repelled']);
+      return time >= GRASP.grace ? enter('caught', ['caught']) : next({ modeTime: time });
     case 'withdrawn':
       return time >= state.away ? stalk() : next({ modeTime: time });
     case 'lost':
       return time >= SHADOW.lostSeconds ? stalk() : next({ modeTime: time });
     case 'chasing': {
       if (inLight) return enter('confronting', ['laugh', 'threaten']);
-      if (canCatch(distance, inLight)) return enter('caught', ['caught']);
+      if (canCatch(distance, inLight)) return enter('grasping', ['grab']);
       const unseen = sees ? 0 : state.unseen + dt;
       if (distance > SHADOW.loseDistance || unseen >= SHADOW.loseUnseen) return enter('lost', ['vanish']);
       if (time >= state.nextTaunt) return next({ modeTime: time, unseen, nextTaunt: state.nextTaunt + SHADOW.tauntSeconds }, ['taunt']);

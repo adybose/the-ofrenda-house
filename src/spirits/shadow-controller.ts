@@ -14,9 +14,9 @@ import type { CellId } from '../world/types';
 import { parseCell } from '../world/grid';
 import { cellCentre, worldToCell } from '../world/units';
 import { ShadowFigure } from './shadow-figure';
-import { AMBUSH, PRESENT, SHADOW, ambushOdds, chooseSpawn, createShadow, findPath, shadowReducer, speedFor, type ShadowMode, type ShadowState, type SpawnCandidate } from './shadow';
+import { AMBUSH, GRASP, PRESENT, SHADOW, ambushOdds, chooseSpawn, createShadow, findPath, shadowReducer, speedFor, type ShadowMode, type ShadowState, type SpawnCandidate } from './shadow';
 import { fetchTaunt } from './taunts';
-import { DARK_LINES, FLEE_LINES, pickLine } from './lines';
+import { DARK_LINES, FLEE_LINES, GRASP_LINES, pickLine } from './lines';
 
 declare module '../core/events' {
   interface GameEvents {
@@ -25,6 +25,10 @@ declare module '../core/events' {
     caughtByShadow: Record<string, never>;
     /** It laughed at a player holding a light, before fleeing (spec 24). */
     shadowLaughed: Record<string, never>;
+    /** Spec 26: it seized the player; `gust` when it blew their flames out first. */
+    shadowGrasped: { gust: boolean };
+    /** Spec 26: the player lit up in time and threw it off. */
+    shadowRepelled: Record<string, never>;
   }
 }
 
@@ -42,6 +46,8 @@ const AMBUSH_AHEAD = [5, 4.5, 5.5, 4, 6];
 const ATTRACT_DELAY = [5, 10] as const;
 /** Seconds after the player starts walking by candlelight alone before its first try (spec 25). */
 const CANDLE_FIRST = 5;
+/** Metres it stoops while it holds the player: its eyes (2.4 m up) come down to theirs (spec 26). */
+const STOOP = 0.75;
 /** It flees a light this fast. */
 const FLEE_SPEED = 2.6;
 
@@ -93,6 +99,10 @@ export class ShadowController {
   private recentLines: string[] = [];
   private lastCell: CellId | undefined;
   private lastStep: [number, number] | undefined;
+  /** 0..1: how far it has stooped to bring its eyes to the player's, while it holds them (spec 26). */
+  private stoop = 0;
+  /** The player's position last frame, for how fast they walk at it (spec 26). */
+  private lastPlayer: [number, number] | undefined;
 
   constructor(private readonly options: ShadowOptions) {
     this.state = createShadow(createRng(options.seed).fork(STREAMS.shadow).seed);
@@ -234,9 +244,16 @@ export class ShadowController {
     else this.candleCheckAt = undefined;
 
     const present = PRESENT.has(this.state.mode);
+    // Spec 26: by flame alone it stands its ground; how fast the player walks at it.
+    const flameOnly = items.flameOnly(flashlight.lit, playerCell);
+    const [lx, lz] = this.lastPlayer ?? [p.x, p.z];
+    this.lastPlayer = [p.x, p.z];
+    const toward = Math.hypot(this.x - p.x, this.z - p.z) || 1;
+    const approach = dt > 0 ? ((p.x - lx) * (this.x - p.x) + (p.z - lz) * (this.z - p.z)) / toward / dt : 0;
     // Faced with a light it flees, still visible as it goes (spec 24); otherwise it comes on.
-    if (this.state.mode === 'confronting' || (this.state.mode === 'withdrawn' && this.figure.fade > 0)) this.flee(dt, p.x, p.z);
-    else if (present) this.move(dt, p.x, p.z, playerCell);
+    if (this.state.mode === 'grasping') this.lunge(dt, p.x, p.z);
+    else if ((this.state.mode === 'confronting' && !flameOnly) || (this.state.mode === 'withdrawn' && this.figure.fade > 0)) this.flee(dt, p.x, p.z);
+    else if (present && this.state.mode !== 'confronting') this.move(dt, p.x, p.z, playerCell);
     const distance = present ? Math.hypot(this.x - p.x, this.z - p.z) : Infinity;
     this.dispatch({
       type: 'tick',
@@ -245,15 +262,29 @@ export class ShadowController {
       distance,
       inLight: lit,
       suppressed: hushed,
+      flameOnly,
+      approach,
     });
 
     const shown = PRESENT.has(this.state.mode);
     this.figure.setFade(this.figure.fade + (shown ? dt : -dt) / FADE);
-    this.figure.position.set(this.x, 0, this.z);
+    this.stoop = Math.min(1, Math.max(0, this.stoop + (this.state.mode === 'grasping' ? dt : -dt) / 0.3));
+    this.figure.position.set(this.x, -STOOP * this.stoop, this.z);
     this.figure.rotation.y = Math.atan2(p.x - this.x, p.z - this.z);
     const near = shown ? Math.min(1, Math.max(0, 1 - (distance - 2) / 16)) : 0;
-    this.options.onTension?.(this.state.mode === 'chasing' ? Math.max(0.85, near) : near * 0.6);
-    flashlight.setFlicker(this.state.mode === 'chasing' && distance < 8 ? 0.8 * (1 - distance / 8) : 0);
+    const grasping = this.state.mode === 'grasping';
+    this.options.onTension?.(grasping ? 1 : this.state.mode === 'chasing' ? Math.max(0.85, near) : near * 0.6);
+    flashlight.setFlicker(grasping ? 1 : this.state.mode === 'chasing' && distance < 8 ? 0.8 * (1 - distance / 8) : 0);
+  }
+
+  /** Spec 26: straight at the player, fast, to just before their eyes. */
+  private lunge(dt: number, px: number, pz: number): void {
+    const dx = px - this.x;
+    const dz = pz - this.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= GRASP.hold) return;
+    const step = Math.min(GRASP.lunge * dt, d - GRASP.hold);
+    [this.x, this.z] = [this.x + (dx / d) * step, this.z + (dz / d) * step];
   }
 
   /** Away from the player, through open floor only. */
@@ -345,7 +376,13 @@ export class ShadowController {
       else if (emit === 'threaten') void this.say(FLEE_LINES);
       else if (emit === 'darkLine') void this.say(DARK_LINES);
       else if (emit === 'taunt') void this.say();
-      else if (emit === 'caught') events.emit('caughtByShadow', {});
+      else if (emit === 'gust') this.seize(true);
+      else if (emit === 'grab') this.seize(false);
+      else if (emit === 'repelled') {
+        events.emit('shadowRepelled', {});
+        this.speaking = false;
+        void this.say(FLEE_LINES);
+      } else if (emit === 'caught') events.emit('caughtByShadow', {});
     }
   }
 
@@ -388,6 +425,23 @@ export class ShadowController {
     const angle = this.rng.float() * Math.PI * 2;
     const reach = 6 + this.rng.float() * 4;
     this.options.audio.play('whisper', { position: [p.x + Math.cos(angle) * reach, 1.6, p.z + Math.sin(angle) * reach], gain: 0.8 });
+  }
+
+  /**
+   * Spec 26: it takes hold of the player. By flame, a gust blows every flame about them out first.
+   * A rush of air, the stinger, and a line in its voice, right in front of them.
+   */
+  private seize(gust: boolean): void {
+    const { audio, items, player } = this.options;
+    const p = player.state();
+    if (gust) {
+      items.gust(worldToCell(p.x, p.z));
+      audio.play('gust', { position: [this.x, 1.6, this.z], gain: 1.6 });
+    }
+    audio.play('stinger');
+    events.emit('shadowGrasped', { gust });
+    this.speaking = false;
+    void this.say(GRASP_LINES);
   }
 
   /** Its laugh, deep and close, at a player who holds a light. */

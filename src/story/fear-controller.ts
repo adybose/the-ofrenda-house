@@ -30,6 +30,7 @@ export class FearController {
     events.on('shadowStateChanged', ({ state }) => {
       if (state === 'hunting') this.dispatch({ type: 'spike', amount: FRIGHTS.shadowAppears });
       if (state === 'confronting') this.dispatch({ type: 'spike', amount: FRIGHTS.shadowConfronts });
+      if (state === 'grasping') this.dispatch({ type: 'spike', amount: FRIGHTS.caught });
     });
   }
 

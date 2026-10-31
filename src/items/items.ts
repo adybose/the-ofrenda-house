@@ -58,6 +58,8 @@ export type ItemsAction =
   | { type: 'use'; standId: string; matchbox?: boolean }
   | { type: 'strikeMatch' }
   | { type: 'blowOut' }
+  /** Spec 26: La Sombra's gust puts out the held candle, the match and the candles on these stands. */
+  | { type: 'gust'; standIds: readonly string[] }
   | { type: 'tick'; dt: number }
   | { type: 'spiritSolved'; characterId: CharacterId }
   | { type: 'keysLeft'; standId: string; keyIds: readonly string[] };
@@ -156,6 +158,15 @@ export function itemsReducer(state: ItemsState, action: ItemsAction): ItemsState
     case 'blowOut':
       if (!heldLit(state)) return unchanged();
       return next({ candles: withCandle(state.hand!, { lit: false }) }, [{ name: 'candleOut', id: state.hand!, reason: 'blown' }]);
+
+    case 'gust': {
+      const ids = [state.hand, ...action.standIds.map((stand) => candleIdAt(state, stand))];
+      const out = ids.filter((id, i): id is string => id !== undefined && ids.indexOf(id) === i && candle(state, id).lit);
+      if (!out.length && state.matchLeft === 0) return unchanged();
+      const candles: Record<string, Candle> = { ...state.candles };
+      for (const id of out) candles[id] = { ...candle(state, id), lit: false };
+      return next({ candles, matchLeft: 0 }, out.map((id) => ({ name: 'candleOut', id, reason: 'blown' })));
+    }
 
     case 'tick': {
       const emits: ItemsEmit[] = [];

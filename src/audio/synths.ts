@@ -884,6 +884,27 @@ export function heartbeat(s: SynthContext): number {
   return 0.6;
 }
 
+/**
+ * La Sombra's gust (spec 26): a cold rush of air that swells and dies in under a second, the band
+ * sweeping up as it hits and falling away after, with a low push of air under it.
+ */
+export function gust(s: SynthContext): number {
+  const seconds = 0.9;
+  const source = noise(s, 'pink');
+  const band = filter(s, 'bandpass', 300, 1.1);
+  band.frequency.setValueAtTime(300, s.t);
+  band.frequency.exponentialRampToValueAtTime(1400, s.t + 0.25);
+  band.frequency.exponentialRampToValueAtTime(500, s.t + seconds);
+  const g = gain(s);
+  g.gain.setValueAtTime(0.0001, s.t);
+  g.gain.exponentialRampToValueAtTime(0.9, s.t + 0.18);
+  g.gain.exponentialRampToValueAtTime(0.0001, s.t + seconds);
+  chain(source, band, g, s.out);
+  startNoise(source, s, s.t, seconds);
+  burst(s, s.t + 0.05, 'brown', 'lowpass', 220, 0.5, 0.4);
+  return seconds;
+}
+
 /** The score's pulse (spec 25): a low, dull boom, like a bass drum struck under a cloth. */
 export function pulse(s: SynthContext): number {
   tone(s, s.t, 70, 36, 0.6, 0.008, 0.9);
@@ -917,6 +938,7 @@ export const SYNTHS = {
   pulse,
   laugh,
   shatter,
+  gust,
 } as const satisfies Record<string, (s: SynthContext) => number>;
 
 export type SoundName = keyof typeof SYNTHS;

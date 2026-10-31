@@ -220,3 +220,32 @@ describe('light and sanctuaries', () => {
     expect(isSanctuary(unsolved, 'key:cook')).toBe(false);
   });
 });
+
+describe('a gust (spec 26)', () => {
+  it('puts out the held candle, the burning match and the given stands’ candles, and nothing else', () => {
+    // A lit candle in hand, lit candles at the cook's stand and a spare, and a match burning.
+    let s = run(equipped(), strike, use(COOK_STAND), use(SPARE), tick(ITEMS.matchSeconds), strike);
+    expect(candle(s, s.hand!).lit).toBe(true);
+    expect(s.matchLeft).toBeGreaterThan(0);
+    expect(candleAt(s, COOK_STAND)?.lit).toBe(true);
+    expect(candleAt(s, SPARE)?.lit).toBe(true);
+    s = itemsReducer(s, { type: 'gust', standIds: [SPARE] });
+    expect(candle(s, s.hand!).lit).toBe(false);
+    expect(s.matchLeft).toBe(0);
+    expect(hasFlame(s)).toBe(false);
+    expect(candleAt(s, SPARE)?.lit).toBe(false);
+    expect(candleAt(s, COOK_STAND)?.lit).toBe(true);
+    expect(s.emits).toEqual([
+      { name: 'candleOut', id: `candle:${ACT1}`, reason: 'blown' },
+      { name: 'candleOut', id: `candle:${SPARE}`, reason: 'blown' },
+    ]);
+    // The candles keep what is left of them, and a struck match lights the held one again.
+    expect(candle(itemsReducer(s, strike), s.hand!).lit).toBe(true);
+  });
+
+  it('does nothing with no flame about', () => {
+    const s = equipped();
+    const after = itemsReducer(s, { type: 'gust', standIds: [SPARE] });
+    expect(after).toEqual({ ...s, emits: [] });
+  });
+});

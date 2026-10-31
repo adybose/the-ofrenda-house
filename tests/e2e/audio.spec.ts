@@ -4,7 +4,7 @@ test('every named sound renders offline: not silent, no NaN, peak at or below 1.
   await page.goto('/?seed=42&debug=hooks&mute=1');
   await page.waitForFunction(() => document.body.dataset.ready === 'true' && Boolean(window.__ofrenda));
   const names = await page.evaluate(() => window.__ofrenda!.soundNames());
-  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'clockTick', 'splat', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'catScream', 'heartbeat', 'pulse', 'laugh', 'shatter']) {
+  for (const sound of ['rain', 'wind', 'thunder', 'creak', 'slam', 'lock', 'unlock', 'footstepWood', 'footstepTile', 'footstepCarpet', 'flashlightClick', 'clock', 'clockTick', 'splat', 'stinger', 'whisper', 'bat', 'rat', 'cat', 'catScream', 'heartbeat', 'pulse', 'laugh', 'shatter', 'gust']) {
     expect(names).toContain(sound);
   }
   for (const name of names) {

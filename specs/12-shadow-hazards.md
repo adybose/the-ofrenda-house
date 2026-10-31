@@ -64,3 +64,4 @@ Vitest: pathfinding, threat, spawn property test, confront and catch rules, flee
 - Not done (Should): the flee simulation over 200 seeded chases. Escape below threat 3 rests on the speeds (at most 2.36 m/s against the player's 2.52, unit-tested) and the 15 m and 4 s rules.
 - The confront distance: it stops when within about 4.5 m (measured 5.5 m in the test, as it was further off when the match was struck); it never closes in on a player who has light.
 - Amended by spec 25: hazards every 28 s ÷ (1 + 0.3 × threat), the first after 35 s; the crash brings down the chandelier ahead in view before trying a painting.
+- Amended by spec 26: within 1 m in the dark it seizes the player, who has 1.5 s to light up and throw it off before they are possessed.

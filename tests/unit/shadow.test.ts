@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from '../../src/core/rng';
 import {
   AMBUSH,
+  GRASP,
   RUN_SPEED,
   ambushOdds,
+  blowsOut,
   SHADOW,
   canCatch,
   chooseSpawn,
@@ -20,7 +22,7 @@ import { cellId } from '../../src/world/grid';
 import { newHouse } from './house-helpers';
 
 type Tick = Extract<ShadowEvent, { type: 'tick' }>;
-const tick = (changes: Partial<Tick> = {}): Tick => ({ type: 'tick', dt: 0.1, sees: false, distance: 10, inLight: false, suppressed: false, ...changes });
+const tick = (changes: Partial<Tick> = {}): Tick => ({ type: 'tick', dt: 0.1, sees: false, distance: 10, inLight: false, suppressed: false, flameOnly: false, approach: 0, ...changes });
 const run = (state: ShadowState, ...events: ShadowEvent[]) => events.reduce(shadowReducer, state);
 /** Ticks until the mode changes (or `limit` seconds), collecting everything emitted. */
 function until(state: ShadowState, event: Tick, limit = 200) {
@@ -82,10 +84,13 @@ describe('modes', () => {
     expect(glimpsed.mode).toBe('chasing');
   });
 
-  it('catches only within 1 m and only in the dark', () => {
+  it('seizes only within 1 m and only in the dark, and catches after the grace (spec 26)', () => {
     const chasing = shadowReducer(hunting(), tick({ sees: true, distance: 9 }));
     expect(shadowReducer(chasing, tick({ sees: true, distance: 1.2 })).mode).toBe('chasing');
-    const caught = shadowReducer(chasing, tick({ sees: true, distance: 0.9 }));
+    const seized = shadowReducer(chasing, tick({ sees: true, distance: 0.9 }));
+    expect(seized.mode).toBe('grasping');
+    expect(seized.emits).toEqual(['grab']);
+    const caught = run(seized, tick({ dt: GRASP.grace, distance: 0.5 }));
     expect(caught.mode).toBe('caught');
     expect(caught.emits).toEqual(['caught']);
     expect(shadowReducer(caught, tick({ dt: 100 })).mode).toBe('caught');
@@ -122,7 +127,7 @@ describe('drawn by darkness, and stepping out in front (spec 24)', () => {
     expect(shadowReducer(createShadow(1), { type: 'attract' }).mode).toBe('dormant');
     const chasing = run(createShadow(1), { type: 'enable' }, { type: 'force', mode: 'chasing' });
     expect(shadowReducer(chasing, { type: 'attract' }).mode).toBe('chasing');
-    const caught = run(chasing, tick({ sees: true, distance: 0.5 }));
+    const caught = run(chasing, tick({ sees: true, distance: 0.5 }), tick({ dt: GRASP.grace, distance: 0.5 }));
     expect(caught.mode).toBe('caught');
     expect(shadowReducer(caught, { type: 'attract' }).mode).toBe('caught');
     expect(shadowReducer(caught, { type: 'ambush' }).mode).toBe('caught');
@@ -275,5 +280,57 @@ describe('ambush odds (spec 25)', () => {
     expect(ambushOdds(0, true)).toEqual({ chance: 0.65, gap: 18 });
     expect(ambushOdds(3, true)).toEqual({ chance: 0.65, gap: 18 });
     expect(AMBUSH.candleEvery).toBe(15);
+  });
+});
+
+describe('walking into it by candlelight (spec 26)', () => {
+  const flame = { inLight: true, flameOnly: true };
+
+  it('blows the flames out when the player closes in within 2.5 m, or stands within 1.2 m, by flame alone', () => {
+    expect(blowsOut({ distance: 2.4, approach: 1, ...flame })).toBe(true);
+    expect(blowsOut({ distance: 2, approach: 0, ...flame })).toBe(false);
+    expect(blowsOut({ distance: 2, approach: 0.3, ...flame })).toBe(false);
+    expect(blowsOut({ distance: 2.6, approach: 2, ...flame })).toBe(false);
+    expect(blowsOut({ distance: 1, approach: 0, ...flame })).toBe(true);
+    // Never with the torch on (or in a sanctuary), and there is nothing to blow out in the dark.
+    expect(blowsOut({ distance: 1, approach: 1, inLight: true, flameOnly: false })).toBe(false);
+    expect(blowsOut({ distance: 1, approach: 1, inLight: false, flameOnly: false })).toBe(false);
+  });
+
+  it('a candle-holder walking at it while it threatens: a gust, and it seizes them', () => {
+    const confronting = shadowReducer(hunting(), tick({ sees: true, distance: 4, ...flame }));
+    expect(confronting.mode).toBe('confronting');
+    expect(shadowReducer(confronting, tick({ sees: true, distance: 2, ...flame })).mode).toBe('confronting');
+    const seized = shadowReducer(confronting, tick({ sees: true, distance: 2, approach: 1.4, ...flame }));
+    expect(seized.mode).toBe('grasping');
+    expect(seized.emits).toEqual(['gust']);
+    // While hunting too, before it would only threaten.
+    expect(shadowReducer(hunting(), tick({ sees: true, distance: 1, ...flame })).emits).toEqual(['gust']);
+    // With the torch on, it only threatens, however close.
+    expect(shadowReducer(confronting, tick({ sees: true, distance: 1, approach: 1.4, inLight: true })).mode).toBe('confronting');
+  });
+
+  it('light within the grace throws it off; none, and the player is caught', () => {
+    const seized = shadowReducer(shadowReducer(hunting(), tick({ sees: true, distance: 4, ...flame })), tick({ sees: true, distance: 1, ...flame }));
+    expect(seized.mode).toBe('grasping');
+    const held = run(seized, ...Array.from({ length: 12 }, () => tick({ distance: 0.55 })));
+    expect(held.mode).toBe('grasping');
+    const thrown = shadowReducer(held, tick({ distance: 0.55, inLight: true }));
+    expect(thrown.mode).toBe('withdrawn');
+    expect(thrown.emits).toEqual(['laugh', 'repelled']);
+    expect(thrown.away).toBeGreaterThanOrEqual(30);
+    const { state, emits } = until(seized, tick({ distance: 0.55 }));
+    expect(state.mode).toBe('caught');
+    expect(emits).toEqual(['caught']);
+    expect(state.emits).toEqual(['caught']);
+    expect(run(seized, ...Array.from({ length: 14 }, () => tick({ distance: 0.55 }))).mode).toBe('grasping');
+    expect(run(seized, ...Array.from({ length: 16 }, () => tick({ distance: 0.55 }))).mode).toBe('caught');
+  });
+
+  it('slips away from a seizure when an encounter opens', () => {
+    const seized = run(createShadow(1), { type: 'enable' }, { type: 'force', mode: 'grasping' });
+    const hushed = shadowReducer(seized, tick({ suppressed: true }));
+    expect(hushed.mode).toBe('stalking');
+    expect(hushed.emits).toEqual(['vanish']);
   });
 });
