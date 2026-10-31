@@ -17,6 +17,8 @@ export interface PlayOptions {
   param?: number;
   /** Seconds from now. */
   delay?: number;
+  /** Positional sounds play at full level within this many metres (1.5 by default; spec 25). */
+  refDistance?: number;
 }
 
 /** Sounds on the stinger bus (dry and close: no room reverb, and the storm ducks under them); the storm's own sounds; thunder has a channel of its own. */
@@ -235,7 +237,7 @@ export class AudioEngine {
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
       panner.distanceModel = 'inverse';
-      panner.refDistance = 1.5;
+      panner.refDistance = options.refDistance ?? 1.5;
       panner.maxDistance = 40;
       panner.rolloffFactor = 1.4;
       panner.positionX.value = options.position[0];

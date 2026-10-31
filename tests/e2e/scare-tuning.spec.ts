@@ -118,3 +118,14 @@ test('walking by candlelight alone, La Sombra steps out ahead of the player', as
   await page.waitForTimeout(150);
   await page.screenshot({ path: 'artifacts/screenshots/25-sombra-candle.png' });
 });
+
+test('the guide’s whisper comes from a few metres along the way', async ({ page }) => {
+  await open(page, 'debug=hooks&shadow=0&guide=3');
+  await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'guideWhisper'), { timeout: 8000 }).toBe(true);
+  const whisper = (await page.evaluate(() => window.__ofrenda!.events())).find((e) => e.name === 'guideWhisper')!;
+  const player = await page.evaluate(() => window.__ofrenda!.player());
+  const [wx, , wz] = whisper.position as [number, number, number];
+  const d = Math.hypot(wx - player.x, wz - player.z);
+  console.log(`whisper ${d.toFixed(2)} m from the player`);
+  expect(d).toBeLessThanOrEqual(4);
+});

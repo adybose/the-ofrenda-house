@@ -25,8 +25,8 @@ SCORE.pulseEvery
 PlayOptions.refDistance?: number; audioLevels().score: { drone, strings }
 // src/scares/door-scares.ts (pure)
 DOOR_SCARE_CHANCE = 0.55; DOOR_SCARE_COOLDOWN = 12; CHANDELIER_SHARE = 0.7
-// src/spirits/shadow-controller.ts
-ambushOdds(threat, byCandle): { chance, gap }   // pure, exported
+// src/spirits/shadow.ts (pure)
+AMBUSH; ambushOdds(threat, byCandle): { chance, gap }
 // src/items: items.holdsFlame()
 ```
 
