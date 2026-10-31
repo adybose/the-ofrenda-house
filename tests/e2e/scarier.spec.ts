@@ -122,3 +122,43 @@ test('when the light goes out, the darkness draws La Sombra, and it says so', as
   expect(dark).toContain(words);
   expect(['hunting', 'chasing']).toContain(await shadowMode(page));
 });
+
+test('a cat sits on the furniture with glowing eyes; opening its door, it screams and a vase shatters', async ({ page }) => {
+  await open(page, 'debug=hooks,scares&shadow=0&cats=all');
+  const seats = await page.evaluate(() => window.__scares!.cats());
+  expect(seats.length).toBeGreaterThan(0);
+
+  // Watching one from across its room, in the dark.
+  const seat = seats[0]!;
+  await page.evaluate((s) => {
+    const step = { N: [0, 1], E: [1, 0], S: [0, -1], W: [-1, 0] }[s.wall] as [number, number];
+    const [px, pz] = [s.x - step[0] * 2.6, s.z + step[1] * 2.6];
+    window.__ofrenda!.place(px, pz, Math.atan2(-(s.x - px), -(s.z - pz)));
+  }, seat);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: 'artifacts/screenshots/24-cat-eyes.png' });
+
+  // A cat behind a closed door: open it.
+  const target = await page.evaluate((cats) => {
+    const house = window.__ofrenda!.house;
+    for (const c of cats) {
+      const room = house.getRoom(c.roomId);
+      for (const id of room?.doors ?? []) {
+        const d = house.getDoor(id);
+        if (!d || d.state !== 'closed') continue;
+        const outside = room!.cells.includes(d.a) ? d.b : d.a;
+        if (!house.roomAt(outside)) continue;
+        return { id, side: room!.cells.includes(d.a) ? ('b' as const) : ('a' as const), roomId: c.roomId };
+      }
+    }
+    return undefined;
+  }, seats);
+  expect(target).toBeDefined();
+  await page.evaluate(({ id, side }) => window.__ofrenda!.standFacingDoor(id, side), target!);
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('KeyE');
+  await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'scareFired' && e.kind === 'cat'), { timeout: 3000 }).toBe(true);
+  await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'vaseShattered'), { timeout: 3000 }).toBe(true);
+  expect((await page.evaluate(() => window.__scares!.cats())).some((c) => c.roomId === target!.roomId)).toBe(false);
+});

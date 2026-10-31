@@ -851,6 +851,24 @@ export function laugh(s: SynthContext): number {
   return length + 1.6;
 }
 
+/**
+ * Glass or porcelain shattering on the floor (spec 24): a hard knock, a spray of bright cracks, and
+ * shards ringing high and dying away.
+ */
+export function shatter(s: SynthContext): number {
+  burst(s, s.t, 'brown', 'lowpass', 300, 0.35, 0.06);
+  burst(s, s.t, 'white', 'highpass', 2500, 0.5, 0.05);
+  for (let i = 0; i < 14; i++) {
+    const at = s.t + 0.005 + s.rng.float() * 0.35 * (i / 14 + 0.2);
+    burst(s, at, 'white', 'bandpass', 2800 + s.rng.float() * 5200, 0.12 + s.rng.float() * 0.18, 0.02 + s.rng.float() * 0.04, 3);
+  }
+  for (let i = 0; i < 6; i++) {
+    const f = 2600 + s.rng.float() * 4200;
+    tone(s, s.t + s.rng.float() * 0.12, f, f * 0.995, 0.04 + s.rng.float() * 0.04, 0.002, 0.25 + s.rng.float() * 0.3);
+  }
+  return 0.9;
+}
+
 /** The grandfather clock's escapement: param 0 is the tick, 1 the lower tock. Woody, not electronic. */
 export function clockTick(input: SynthContext): number {
   const s = withLevel(input, 5);
@@ -893,6 +911,7 @@ export const SYNTHS = {
   catScream,
   heartbeat,
   laugh,
+  shatter,
 } as const satisfies Record<string, (s: SynthContext) => number>;
 
 export type SoundName = keyof typeof SYNTHS;

@@ -1,5 +1,7 @@
 import type { PlayerController } from '../player/controller';
 import type { Scares } from '../scares/scares';
+import type { CatEncounters } from '../scares/cat-encounters';
+import type { CatSeat } from '../scares/cats';
 import type { ScareKind, ScareTrigger } from '../scares/scheduler';
 
 /** Test handle on window.__scares, installed by `?debug=scares` (spec 13). */
@@ -10,6 +12,8 @@ export interface ScaresDebug {
   trip(kind: ScareKind): boolean;
   active(): number;
   triggers(): ScareTrigger[];
+  /** Spec 24: the cats sitting in the loaded rooms. */
+  cats(): CatSeat[];
 }
 
 declare global {
@@ -18,7 +22,7 @@ declare global {
   }
 }
 
-export function installScaresDebug(options: { scares: Scares; player: PlayerController; fire: string | null }): void {
+export function installScaresDebug(options: { scares: Scares; cats: CatEncounters; player: PlayerController; fire: string | null }): void {
   const { scares, player } = options;
   /** A bat from 4 m out near the ceiling; a rat or a cat on the floor a few metres ahead. */
   const ahead = (kind: ScareKind) => {
@@ -31,6 +35,7 @@ export function installScaresDebug(options: { scares: Scares; player: PlayerCont
     trip: (kind) => scares.fire(kind, ahead(kind)),
     active: () => scares.activeCount(),
     triggers: () => scares.allTriggers(),
+    cats: () => options.cats.seats(),
   };
   const kind = options.fire;
   if (kind === 'bat' || kind === 'rat' || kind === 'cat') setTimeout(() => window.__scares!.fire(kind), 1000);

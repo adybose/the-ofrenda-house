@@ -31,6 +31,7 @@ import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
 import { Hazards } from './spirits/hazards';
 import { Scares } from './scares/scares';
+import { CatEncounters } from './scares/cat-encounters';
 import { ShadowController } from './spirits/shadow-controller';
 import { createCaption } from './ui/caption';
 import { StoryFlow } from './story/act1';
@@ -104,11 +105,13 @@ async function startGame(): Promise<void> {
   const items = new ItemsController({ scene, house, interactions, matches: url.searchParams.has('matches') ? Number(url.searchParams.get('matches')) : undefined });
   // Built once the audio and torch exist (spec 13); it catches up on the chunks loaded before then.
   let scares: Scares | undefined = undefined;
+  let cats: CatEncounters | undefined = undefined;
   const applyDiff = (diff: ChunkDiff, options?: { spread?: boolean }) => {
     view.apply(diff, options);
     doors.sync(diff);
     items.sync(diff);
     scares?.sync(diff);
+    cats?.sync(diff);
   };
 
   // The game opens outside the house (spec 16). `?skip=prologue` starts in the entrance hall with
@@ -299,7 +302,12 @@ async function startGame(): Promise<void> {
       hazards?.dropChandelier(x, z);
     },
     forceDoorScare: doorScareParam === 'bats' || doorScareParam === 'batsChandelier' || doorScareParam === 'rats' ? doorScareParam : undefined,
+    // A cat in the room beyond the door is startled instead (spec 24).
+    startleCat: (roomId) => cats?.startle(roomId) ?? false,
   });
+  // Cats on the furniture (spec 24); `&cats=all` seats one wherever one fits.
+  cats = new CatEncounters({ seed, scene, camera, audio, player, all: url.searchParams.get('cats') === 'all' });
+  cats.sync({ loaded: house.loadedChunks(), unloaded: [] });
   scares.sync({ loaded: house.loadedChunks(), unloaded: [] });
 
   // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it
@@ -515,6 +523,7 @@ async function startGame(): Promise<void> {
       fear.update(dt);
       // After dawn the scares are over too (spec 22).
       scares!.update(dt, heldOff || dawn!.over());
+      if (!heldOff) cats!.update(dt);
     }
     flashlight.update(paused ? 0 : dt, camera);
     camera.getWorldDirection(forward);
@@ -558,7 +567,7 @@ async function startGame(): Promise<void> {
   if (debug.has('spirits')) (await import('./debug/encounter')).showSpiritLineup({ caseFile, seed, scene, player });
   if (debug.has('items')) (await import('./debug/items')).installItemsDebug({ items, house, player, flashlight });
   if (debug.has('shadow')) (await import('./debug/shadow')).installShadowDebug({ shadow, hazards });
-  if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, player, fire: url.searchParams.get('fire') });
+  if (debug.has('scares')) (await import('./debug/scares')).installScaresDebug({ scares: scares!, cats: cats!, player, fire: url.searchParams.get('fire') });
 
   if (debug.size > 0) window.__story = { stage: () => story!.stage, clock: () => story!.clockLabel() };
   // `&ending=true|escape|possessed|trapped`: straight to an ending screen.
