@@ -24,6 +24,7 @@ import {
   candle,
   candleAt,
   createItems,
+  hasFlame,
   inLight,
   isSanctuary,
   itemsReducer,
@@ -185,6 +186,11 @@ export class ItemsController {
   inLight(flashlightLit: boolean, cell: CellId): boolean {
     const room = this.options.house.roomAt(cell);
     return inLight(this.state, { flashlightLit, roomStandIds: room ? standsOf(room).map((s) => s.id) : [] });
+  }
+
+  /** A lit candle or a burning match in hand (spec 25: La Sombra is bolder by its light alone). */
+  holdsFlame(): boolean {
+    return hasFlame(this.state);
   }
 
   isSanctuary(roomId: string): boolean {

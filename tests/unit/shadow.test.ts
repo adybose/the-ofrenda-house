@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../src/core/rng';
 import {
+  AMBUSH,
   RUN_SPEED,
+  ambushOdds,
   SHADOW,
   canCatch,
   chooseSpawn,
@@ -259,5 +261,19 @@ describe('hazards', () => {
     expect(played).toEqual(['creak']);
     expect(fired).toEqual(['killed', 'torch']);
     off();
+  });
+});
+
+describe('ambush odds (spec 25)', () => {
+  it('step out at a door or corner 30% plus 5% per threat of the time, at most every 30 s', () => {
+    expect(ambushOdds(0, false)).toEqual({ chance: 0.3, gap: 30 });
+    expect(ambushOdds(2, false).chance).toBeCloseTo(0.4);
+    expect(ambushOdds(4, false).gap).toBe(30);
+  });
+
+  it('by candlelight alone: 65%, at most every 18 s, and tried every 15 s as the player walks', () => {
+    expect(ambushOdds(0, true)).toEqual({ chance: 0.65, gap: 18 });
+    expect(ambushOdds(3, true)).toEqual({ chance: 0.65, gap: 18 });
+    expect(AMBUSH.candleEvery).toBe(15);
   });
 });

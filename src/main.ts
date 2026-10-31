@@ -366,6 +366,7 @@ async function startGame(): Promise<void> {
     suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
     onTension: (level) => fear.hold(level),
     alwaysAmbush: url.searchParams.get('sombra') === 'door',
+    candleAmbush: url.searchParams.get('sombra') === 'candle',
   });
   hazards = new Hazards({
     seed,

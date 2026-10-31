@@ -84,3 +84,37 @@ test('La Sombra brings down the chandelier of the room ahead, in front of the pl
   expect(d).toBeGreaterThanOrEqual(2);
   expect(d).toBeLessThanOrEqual(5.5);
 });
+
+test('walking by candlelight alone, La Sombra steps out ahead of the player', async ({ page }) => {
+  test.setTimeout(60_000);
+  await open(page, 'debug=hooks,shadow,items&sombra=candle');
+  // The candle and matches at the Act 1 dead end: take them and light the candle; the torch stays off.
+  expect(await page.evaluate(() => window.__items!.goTo('stand:act1-corridor'))).toBe(true);
+  await page.evaluate(() => window.__ofrenda!.frames(5));
+  await page.keyboard.press('KeyE');
+  await expect.poll(() => page.evaluate(() => window.__items!.state().hasMatchbox)).toBe(true);
+  await page.keyboard.press('KeyE');
+  await expect.poll(() => page.evaluate(() => window.__items!.state().hand)).toBe('candle:stand:act1-corridor');
+  await page.keyboard.press('KeyM');
+  await expect.poll(() => page.evaluate(() => window.__items!.inLight())).toBe(true);
+  expect(await page.evaluate(() => window.__ofrenda!.flashlight().on)).toBe(false);
+  // Turn round from the stand and walk up the corridor, back and forth, until it comes.
+  const start = await page.evaluate(() => window.__ofrenda!.player());
+  const started = Date.now();
+  let laughed = false;
+  for (let leg = 0; leg < 12 && !laughed; leg++) {
+    await page.evaluate(({ x, z, yaw }) => window.__ofrenda!.place(x, z, yaw), { ...start, yaw: start.yaw + Math.PI });
+    await page.keyboard.down('ArrowUp');
+    for (let i = 0; i < 6 && !laughed; i++) {
+      await page.waitForTimeout(250);
+      laughed = (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'shadowLaughed');
+    }
+    await page.keyboard.up('ArrowUp');
+  }
+  const seconds = (Date.now() - started) / 1000;
+  console.log(`La Sombra stepped out after ${seconds.toFixed(1)} s by candlelight`);
+  expect(laughed).toBe(true);
+  expect(seconds).toBeLessThan(20);
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: 'artifacts/screenshots/25-sombra-candle.png' });
+});
