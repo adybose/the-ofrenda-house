@@ -13,6 +13,7 @@ import { nearestWindow } from './lighting/windows';
 import { createTextureCache } from './render/atlas';
 import { createPostPipeline } from './render/post';
 import { WorldView } from './render/world-view';
+import { hideChandelier } from './render/chunk-mesh';
 import { createPlayerController } from './player/controller';
 import { DoorController } from './player/doors';
 import { Interactions } from './player/interaction';
@@ -43,7 +44,7 @@ import { createJournal, type Journal } from './ui/journal';
 import { createPrompt } from './ui/prompt';
 import { createCollisionMap } from './world/collision';
 import { composeCollision, exteriorCollision, exteriorLayout } from './world/exterior';
-import { DIR_STEP, cellId, parseCell } from './world/grid';
+import { DIR_STEP, cellId, chunkId, chunkOfCell, parseCell } from './world/grid';
 import { createHouse } from './world/house';
 import type { CellId, ChunkDiff, Room } from './world/types';
 import { cellCentre, worldToCell } from './world/units';
@@ -282,7 +283,23 @@ async function startGame(): Promise<void> {
   events.on('ending', () => (ended = true));
 
   // Bats, rats and cats (spec 13), in the rooms already loaded and every chunk from now on.
-  scares = new Scares({ seed, house, scene, camera, audio, flashlight, player });
+  const doorScareParam = url.searchParams.get('doorscare');
+  scares = new Scares({
+    seed,
+    house,
+    scene,
+    camera,
+    audio,
+    flashlight,
+    player,
+    // Bats startled by an opened door bring a chandelier down in front of the player (spec 24).
+    dropChandelier: (x, z, cell) => {
+      const group = view.chunk(chunkId(...chunkOfCell(cell)));
+      if (group) hideChandelier(group, cell);
+      hazards?.dropChandelier(x, z);
+    },
+    forceDoorScare: doorScareParam === 'bats' || doorScareParam === 'batsChandelier' || doorScareParam === 'rats' ? doorScareParam : undefined,
+  });
   scares.sync({ loaded: house.loadedChunks(), unloaded: [] });
 
   // Spec 21: the key to the way out reveals the dining room, locked by that key; walking in with it

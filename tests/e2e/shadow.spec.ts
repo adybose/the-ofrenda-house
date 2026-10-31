@@ -98,23 +98,35 @@ test('caught in the dark: the screen goes black and the player is possessed', as
   expect(names).toContain('caughtByShadow');
 });
 
-test('a chandelier crashes down a few metres ahead of the player, never on them', async ({ page }) => {
+test('a painting comes down off the wall the player faces, a step or two ahead, never on them', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__ofrenda!.viewRoom('filler'));
   await page.keyboard.press('KeyF');
-  await page.evaluate(() => window.__ofrenda!.frames(5));
-  expect(await page.evaluate(() => window.__shadow!.hazard('crash'))).toBe(true);
+  // Walk up until a wall is 1.2 to 3 m ahead: only then can a painting fall (spec 24).
+  let fired = false;
+  for (let i = 0; i < 12 && !fired; i++) {
+    fired = await page.evaluate(() => window.__shadow!.hazard('crash'));
+    if (!fired) {
+      await page.evaluate(() => {
+        const p = window.__ofrenda!.player();
+        window.__ofrenda!.place(p.x - Math.sin(p.yaw) * 0.4, p.z - Math.cos(p.yaw) * 0.4, p.yaw);
+      });
+      await page.evaluate(() => window.__ofrenda!.frames(2));
+    }
+  }
+  expect(fired).toBe(true);
+  // Mid-fall: it comes off the wall half a second after the creak.
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: 'artifacts/screenshots/12-painting.png' });
   await expect.poll(async () => (await page.evaluate(() => window.__ofrenda!.events())).some((e) => e.name === 'hazard')).toBe(true);
   const hazard = (await page.evaluate(() => window.__ofrenda!.events())).find((e) => e.name === 'hazard')!;
   const player = await page.evaluate(() => window.__ofrenda!.player());
   const [hx, , hz] = hazard.position as [number, number, number];
   const d = Math.hypot(hx - player.x, hz - player.z);
   const ahead = (hx - player.x) * -Math.sin(player.yaw) + (hz - player.z) * -Math.cos(player.yaw);
-  console.log(`crash: ${d.toFixed(2)} m from the player, ${ahead.toFixed(2)} m ahead`);
+  console.log(`painting: ${d.toFixed(2)} m from the player, ${ahead.toFixed(2)} m ahead`);
   expect(hazard.kind).toBe('crash');
-  expect(d).toBeGreaterThanOrEqual(2);
-  expect(d).toBeLessThanOrEqual(4);
+  expect(d).toBeGreaterThanOrEqual(1.1);
+  expect(d).toBeLessThanOrEqual(3.1);
   expect(ahead).toBeGreaterThan(0);
-  await page.waitForTimeout(1200);
-  await page.screenshot({ path: 'artifacts/screenshots/12-chandelier.png' });
 });

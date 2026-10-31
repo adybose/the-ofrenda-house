@@ -1,4 +1,4 @@
-import type { Object3D, Scene } from 'three';
+import { BoxGeometry, Float32BufferAttribute, Group, Mesh, MeshLambertMaterial, PlaneGeometry, type Object3D, type Scene } from 'three';
 import type { AudioEngine } from '../audio/engine';
 import { events } from '../core/events';
 import { createRng, STREAMS, type Rng } from '../core/rng';
@@ -8,6 +8,8 @@ import type { DoorController } from '../player/doors';
 import type { Box, CollisionMap } from '../player/movement';
 import type { TextureCache } from '../render/atlas';
 import { props } from '../render/props';
+import { paintingSpot } from '../scares/door-scares';
+import { DIR_STEP } from '../world/grid';
 import type { House } from '../world/house';
 import type { DoorId } from '../world/types';
 import { ROOM_HEIGHT, cellCentre, worldToCell } from '../world/units';
@@ -34,13 +36,21 @@ const FALL = 0.45;
 
 interface Falling {
   mesh: Object3D;
-  from: number;
-  to: number;
-  kind: 'chandelier' | 'mirror';
   elapsed: number;
-  box: Box;
+  /** Poses it for k, 0 (hanging) to 1 (down). */
+  animate(k: number): void;
+  box?: Box;
   left: number;
 }
+
+declare module '../core/events' {
+  interface GameEvents {
+    /** A chandelier brought down by bats the player startled (spec 24). */
+    chandelierFell: { position: [number, number, number] };
+  }
+}
+
+const frameWood = new MeshLambertMaterial({ color: 0x5a3a22 });
 
 /**
  * La Sombra's hazards (spec 12): a chandelier or mirror crashing down a few metres ahead, a door
@@ -80,9 +90,7 @@ export class Hazards implements CollisionMap {
     }
     for (const f of [...this.falling]) {
       f.elapsed += dt;
-      const k = Math.min(1, f.elapsed / FALL);
-      if (f.kind === 'chandelier') f.mesh.position.y = f.from + (f.to - f.from) * k * k;
-      else f.mesh.rotation.x = -(Math.PI / 2) * k * k;
+      f.animate(Math.min(1, f.elapsed / FALL));
       if ((f.left -= dt) <= 0) {
         f.mesh.removeFromParent();
         this.falling.splice(this.falling.indexOf(f), 1);
@@ -118,7 +126,7 @@ export class Hazards implements CollisionMap {
   }
 
   boxesNear(x: number, z: number, radius: number): readonly Box[] {
-    return this.falling.map((f) => f.box).filter((b) => b.minX - radius < x && x < b.maxX + radius && b.minZ - radius < z && z < b.maxZ + radius);
+    return this.falling.flatMap((f) => (f.box ? [f.box] : [])).filter((b) => b.minX - radius < x && x < b.maxX + radius && b.minZ - radius < z && z < b.maxZ + radius);
   }
 
   /** A point on open floor 2 to 4 m ahead of the player, with nothing but open doorways between. */
@@ -142,44 +150,84 @@ export class Hazards implements CollisionMap {
     return undefined;
   }
 
+  /**
+   * La Sombra's crash (spec 24): a painting comes down off the wall the player is facing, 1.2 to 3 m
+   * ahead, so they see it fall; when they face no such wall, nothing.
+   */
   private planCrash(): { position: [number, number, number]; fire(): void } | undefined {
-    const spot = this.aheadOfPlayer();
+    const { house, player, scene, textures, audio } = this.options;
+    const p = player.state();
+    const room = house.roomAt(worldToCell(p.x, p.z));
+    const spot = room ? paintingSpot(room, p) : undefined;
     if (!spot) return undefined;
-    const { house, scene, textures, audio } = this.options;
-    const room = house.roomAt(worldToCell(spot.x, spot.z));
-    const height = ROOM_HEIGHT[room?.size ?? 'medium'];
-    const mirror = this.rng.chance(0.3);
+    const [dx, dy] = DIR_STEP[spot.side];
+    // Hung on the wall's face (the cell's edge less the wall's inset), facing into the room.
+    const [wx, wz] = [spot.x - dx * 0.14, spot.z + dy * 0.14];
     return {
-      position: [spot.x, height - 0.3, spot.z],
+      position: [wx, 1.6, wz],
       fire: () => {
-        const group: Object3D = mirror ? props.mirror(textures) : props.chandelier(textures);
-        if (mirror) {
-          // Stood across the way facing the player, it tips away from them and smashes flat.
-          group.position.set(spot.x, 0, spot.z);
-          group.rotation.order = 'YXZ';
-          group.rotation.y = Math.atan2(-spot.forward[0], -spot.forward[1]);
-        } else {
-          group.position.set(spot.x, height, spot.z);
-          group.rotation.z = 0.25;
-        }
-        scene.add(group);
-        const half = mirror ? 1.2 : 0.45;
-        const [cx, cz] = mirror ? [spot.x + spot.forward[0] * 1.1, spot.z + spot.forward[1] * 1.1] : [spot.x, spot.z];
+        const painting = new Group();
+        const frame = new Mesh(new BoxGeometry(0.72, 0.92, 0.05), frameWood);
+        const rect = textures.portraitUv('smile');
+        const plane = new PlaneGeometry(0.6, 0.8);
+        const uv = plane.getAttribute('uv');
+        uv.setXY(0, rect.u0, rect.vTop);
+        uv.setXY(1, rect.u1, rect.vTop);
+        uv.setXY(2, rect.u0, rect.vBottom);
+        uv.setXY(3, rect.u1, rect.vBottom);
+        plane.setAttribute('color', new Float32BufferAttribute(new Array(12).fill(1), 3));
+        const picture = new Mesh(plane, textures.portraitMaterial);
+        picture.position.z = 0.03;
+        // Pivot at the bottom edge, so it tips forward off the wall as it drops.
+        frame.position.y = 0.46;
+        picture.position.y = 0.46;
+        painting.add(frame, picture);
+        painting.rotation.order = 'YXZ';
+        painting.rotation.y = Math.atan2(-dx, dy);
+        painting.position.set(wx, 1.2, wz);
+        scene.add(painting);
         this.falling.push({
-          mesh: group,
-          from: height,
-          to: 0.78,
-          kind: mirror ? 'mirror' : 'chandelier',
+          mesh: painting,
           elapsed: 0,
-          box: { minX: cx - half, maxX: cx + half, minZ: cz - half, maxZ: cz + half },
+          animate: (k) => {
+            painting.position.y = 1.2 * (1 - k * k);
+            painting.rotation.x = (Math.PI / 2.4) * k * k;
+          },
           left: BLOCKS,
         });
         setTimeout(() => {
-          audio.play('slam', { position: [spot.x, 0.5, spot.z], gain: 1.5 });
+          audio.play('slam', { position: [wx, 0.3, wz], gain: 1.3 });
           audio.play('stinger', { gain: 0.8 });
         }, FALL * 1000);
       },
     };
+  }
+
+  /**
+   * A chandelier comes crashing down at (x, z) (spec 24: bats startled by the player opening a door
+   * bring it down in front of them). It blocks the way for a while.
+   */
+  dropChandelier(x: number, z: number): void {
+    const { house, scene, textures, audio } = this.options;
+    const height = ROOM_HEIGHT[house.roomAt(worldToCell(x, z))?.size ?? 'medium'];
+    const chandelier = props.chandelier(textures);
+    chandelier.position.set(x, height, z);
+    chandelier.rotation.z = 0.25;
+    scene.add(chandelier);
+    const half = 0.45;
+    this.falling.push({
+      mesh: chandelier,
+      elapsed: 0,
+      animate: (k) => (chandelier.position.y = height + (0.78 - height) * k * k),
+      box: { minX: x - half, maxX: x + half, minZ: z - half, maxZ: z + half },
+      left: BLOCKS,
+    });
+    audio.play('creak', { position: [x, height - 0.3, z], gain: 1.2 });
+    setTimeout(() => {
+      audio.play('slam', { position: [x, 0.5, z], gain: 1.5 });
+      audio.play('stinger', { gain: 0.8 });
+      events.emit('chandelierFell', { position: [x, 0.5, z] });
+    }, FALL * 1000);
   }
 
   /** A door near the player, not one they stand in, slams shut and jams. */

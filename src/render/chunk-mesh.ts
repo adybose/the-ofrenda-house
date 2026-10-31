@@ -316,6 +316,15 @@ export function buildChunkMesh(chunk: Chunk, textures: TextureCache): Group {
   return group;
 }
 
+/** Takes a chandelier down from its ceiling (spec 24: it has fallen). */
+export function hideChandelier(group: Group, cell: CellId): void {
+  const index = (group.userData as ChunkMeshData).chandeliers.get(cell);
+  const chandeliers = group.getObjectByName('chandeliers') as InstancedMesh | undefined;
+  if (index === undefined || !chandeliers) return;
+  chandeliers.setMatrixAt(index, new Matrix4().makeScale(0, 0, 0));
+  chandeliers.instanceMatrix.needsUpdate = true;
+}
+
 /** Swings a door: 0 closed, 1 fully open. Used by spec 05. */
 export function setDoorOpen(group: Group, doorId: DoorId, amount: number): void {
   const info = (group.userData as ChunkMeshData).doors.get(doorId);
