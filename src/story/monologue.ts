@@ -48,6 +48,8 @@ export interface Thought {
   line: string | ((vars: Vars) => string);
   /** May show again this many seconds after it last did; otherwise once per run. */
   repeatEvery?: number;
+  /** Dropped if this holds by the time it would show (it may wait its turn behind other things). */
+  stale?(ctx: MonologueContext): boolean;
   /** Another thought this long after, unless the player has acted by then. */
   followUp?: { id: string; after: number; unless(ctx: MonologueContext): boolean };
 }
@@ -60,6 +62,7 @@ export const THOUGHTS: readonly Thought[] = [
     id: 'findCandle',
     on: 'findCandle',
     line: 'There must be a candle somewhere here.',
+    stale: (ctx) => ctx.hasCandle,
     followUp: { id: 'findCandleAgain', after: 20, unless: (ctx) => ctx.hasCandle || ctx.hasMatchbox },
   },
   { id: 'findCandleAgain', on: 'findCandle', when: () => false, line: 'Something on that stand, in the corner…' },
@@ -100,6 +103,11 @@ export type MonologueEvent =
 
 export function createMonologue(): MonologueState {
   return { last: {}, queue: [], followUps: [], busyUntil: 0 };
+}
+
+/** Whether a thought has been overtaken by events: dropped from the queue, and cleared if on screen. */
+export function isStale(id: string, ctx: MonologueContext): boolean {
+  return THOUGHTS.find((t) => t.id === id)?.stale?.(ctx) === true;
 }
 
 const lineOf = (thought: Thought, vars: Vars) => (typeof thought.line === 'string' ? thought.line : thought.line(vars));
@@ -147,7 +155,14 @@ export function monologueReducer(state: MonologueState, event: MonologueEvent): 
           if (thought && !f.unless(ctx) && ready(next, thought, now)) next = enqueue(next, thought, now, {});
         }
       }
-      if (blocked || now < next.busyUntil || next.queue.length === 0) return next;
+      if (blocked || now < next.busyUntil) return next;
+      // Thoughts overtaken while they waited go unsaid, and so do their follow-ups.
+      const stale = (id: string) => isStale(id, ctx);
+      if (next.queue.some((q) => stale(q.id))) {
+        const dropped = next.queue.filter((q) => stale(q.id)).map((q) => THOUGHTS.find((t) => t.id === q.id)?.followUp?.id);
+        next = { ...next, queue: next.queue.filter((q) => !stale(q.id)), followUps: next.followUps.filter((f) => !dropped.includes(f.id)) };
+      }
+      if (next.queue.length === 0) return next;
       const [show, ...queue] = next.queue;
       return { ...next, queue, show, busyUntil: now + THOUGHT_SECONDS };
     }

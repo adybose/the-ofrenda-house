@@ -19,6 +19,8 @@ async function byCandle(page: Page) {
   await page.keyboard.press('KeyM');
   await expect.poll(() => page.evaluate(() => window.__items!.inLight())).toBe(true);
   expect(await page.evaluate(() => window.__ofrenda!.flashlight().on)).toBe(false);
+  // Spec 20's fix: with a candle in hand, the thought about finding one is gone.
+  expect(await page.locator('#thought').evaluate((e) => e.dataset.id !== 'findCandle' || e.style.opacity === '0')).toBe(true);
 }
 
 const mode = (page: Page) => page.evaluate(() => window.__shadow!.mode());
