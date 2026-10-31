@@ -870,13 +870,25 @@ export function clockTick(input: SynthContext): number {
   return 0.15;
 }
 
-/** One lub-dub. param scales the strength (spec 12's tension). */
+/**
+ * One lub-dub. param scales the strength (spec 12's tension). Over the low thump, a chest knock an
+ * octave up that a laptop's speakers can carry (spec 25).
+ */
 export function heartbeat(s: SynthContext): number {
   const strength = Math.min(1, Math.max(0.1, s.param || 1));
-  tone(s, s.t, 58, 40, 0.8 * strength, 0.01, 0.16);
-  burst(s, s.t, 'brown', 'lowpass', 120, 0.25 * strength, 0.12);
-  tone(s, s.t + 0.28, 50, 38, 0.55 * strength, 0.01, 0.13);
+  tone(s, s.t, 58, 40, 0.6 * strength, 0.01, 0.16);
+  tone(s, s.t, 116, 80, 0.3 * strength, 0.006, 0.12);
+  burst(s, s.t, 'brown', 'lowpass', 260, 0.3 * strength, 0.1);
+  tone(s, s.t + 0.28, 50, 38, 0.42 * strength, 0.01, 0.13);
+  tone(s, s.t + 0.28, 100, 76, 0.22 * strength, 0.006, 0.1);
   return 0.6;
+}
+
+/** The score's pulse (spec 25): a low, dull boom, like a bass drum struck under a cloth. */
+export function pulse(s: SynthContext): number {
+  tone(s, s.t, 70, 36, 0.6, 0.008, 0.9);
+  burst(s, s.t, 'brown', 'lowpass', 140, 0.35, 0.35);
+  return 1.1;
 }
 
 export const SYNTHS = {
@@ -902,6 +914,7 @@ export const SYNTHS = {
   cat,
   catScream,
   heartbeat,
+  pulse,
   laugh,
   shatter,
 } as const satisfies Record<string, (s: SynthContext) => number>;

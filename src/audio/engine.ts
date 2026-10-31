@@ -5,6 +5,7 @@ import { ghostVoice } from './ghost';
 import { generateImpulse } from './impulse';
 import { WHISPER_VARIANTS, pickVariant } from './noise';
 import { OneShotPool } from './pool';
+import { SCORE, scoreLevels } from './score';
 import { SYNTHS, type SoundName } from './synths';
 
 export type Vec3 = readonly [number, number, number];
@@ -19,7 +20,7 @@ export interface PlayOptions {
 }
 
 /** Sounds on the stinger bus (dry and close: no room reverb, and the storm ducks under them); the storm's own sounds; thunder has a channel of its own. */
-const STINGERS: ReadonlySet<SoundName> = new Set(['stinger', 'whisper']);
+const STINGERS: ReadonlySet<SoundName> = new Set(['stinger', 'whisper', 'heartbeat']);
 const STORM: ReadonlySet<SoundName> = new Set(['rain', 'wind', 'splat']);
 
 /** The storm's level: full outside; indoors, quieter the further from a window. */
@@ -72,6 +73,10 @@ export class AudioEngine {
   private nextTick = 0;
   private tock = false;
   private lastWhisper: number | undefined;
+  private score!: GainNode;
+  private drone!: GainNode;
+  private strings!: GainNode;
+  private nextPulse = 0;
 
   constructor(private readonly options: { seed: number; muted: boolean }) {
     this.rng = createRng(options.seed).fork('audio');
@@ -158,6 +163,48 @@ export class AudioEngine {
     windLevel.gain.value = 0.7;
     windLevel.connect(this.muffle);
     SYNTHS.wind({ ctx, out: windLevel, t: ctx.currentTime, param: 0, seconds: forever, rng: this.rng.fork('wind') });
+
+    this.buildScore(ctx, send);
+  }
+
+  /**
+   * The suspense score (spec 25): a low detuned drone and a high tremolo string cluster, always
+   * running, silent until fear raises their levels (see `update`). Through the room reverb.
+   */
+  private buildScore(ctx: AudioContext, send: (bus: GainNode) => void): void {
+    this.score = ctx.createGain();
+    send(this.score);
+    const saw = (frequency: number, out: AudioNode) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = frequency;
+      osc.connect(out);
+      osc.start();
+    };
+    // The drone: A1, B-flat 1 and E2, each a pair of saws a few cents apart, low-passed dark.
+    this.drone = ctx.createGain();
+    this.drone.gain.value = 0;
+    const dark = ctx.createBiquadFilter();
+    dark.type = 'lowpass';
+    dark.frequency.value = 400;
+    dark.connect(this.drone).connect(this.score);
+    for (const f of [55, 58.27, 82.41]) for (const cents of [-6, 6]) saw(f * 2 ** (cents / 1200), dark);
+    // The strings: A4 A#4 D#5 E5, bowed in a fast tremolo.
+    this.strings = ctx.createGain();
+    this.strings.gain.value = 0;
+    const tremolo = ctx.createGain();
+    tremolo.gain.value = 0.5;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 9;
+    const depth = ctx.createGain();
+    depth.gain.value = 0.5;
+    lfo.connect(depth).connect(tremolo.gain);
+    lfo.start();
+    const soft = ctx.createBiquadFilter();
+    soft.type = 'lowpass';
+    soft.frequency.value = 3000;
+    soft.connect(tremolo).connect(this.strings).connect(this.score);
+    for (const f of [440, 466.16, 622.25, 659.26]) saw(f, soft);
   }
 
   private impulse(size: SizeClass): AudioBuffer {
@@ -183,7 +230,7 @@ export class AudioEngine {
     const at = ctx.currentTime + (options.delay ?? 0);
     const level = ctx.createGain();
     level.gain.value = options.gain ?? 1;
-    const bus = STINGERS.has(name) ? this.stingers : STORM.has(name) ? this.muffle : name === 'thunder' ? this.thunderIn : this.effects;
+    const bus = STINGERS.has(name) ? this.stingers : STORM.has(name) ? this.muffle : name === 'thunder' ? this.thunderIn : name === 'pulse' ? this.score : this.effects;
     if (options.position) {
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
@@ -298,11 +345,20 @@ export class AudioEngine {
     if (this.tension > 0.02 && now >= this.nextBeat) {
       const bpm = 55 + 95 * this.tension;
       const at = Math.max(now, this.nextBeat);
-      // Clearly heard (spec 24): louder as fear rises.
-      this.play('heartbeat', { param: 0.3 + 0.7 * this.tension, gain: 0.6 + 0.9 * this.tension, delay: at - now });
+      // Clearly heard as it rises (spec 25): on the stinger bus, so the storm ducks under it.
+      this.play('heartbeat', { param: 0.3 + 0.7 * this.tension, gain: 0.9 + 1.2 * this.tension, delay: at - now });
       this.nextBeat = at + 60 / bpm;
     } else if (this.tension <= 0.02) {
       this.nextBeat = now;
+    }
+
+    // The score swells with fear and fades as it eases.
+    const score = scoreLevels(this.tension);
+    this.drone.gain.setTargetAtTime(score.drone, now, score.drone > this.drone.gain.value ? 0.6 : 2);
+    this.strings.gain.setTargetAtTime(score.strings, now, score.strings > this.strings.gain.value ? 0.3 : 1.5);
+    if (score.pulse && now >= this.nextPulse) {
+      this.play('pulse', { gain: 0.8 });
+      this.nextPulse = now + SCORE.pulseEvery;
     }
 
     // Heavy drops at random over the rain, so it never falls into a pattern.
@@ -371,9 +427,10 @@ export class AudioEngine {
     return out;
   }
 
-  /** For tests: the ambience level after ducking, and the master level. */
-  levels(): { ambience: number; storm: number; thunder: number; master: number } {
+  /** For tests: the ambience level after ducking, the master level, and the score's layers. */
+  levels(): { ambience: number; storm: number; thunder: number; master: number; score: { drone: number; strings: number } } {
     return {
+      score: { drone: this.drone?.gain.value ?? 0, strings: this.strings?.gain.value ?? 0 },
       ambience: this.ambience?.gain.value ?? 1,
       storm: this.storm?.gain.value ?? 1,
       thunder: this.thunderLevel?.gain.value ?? 1,
