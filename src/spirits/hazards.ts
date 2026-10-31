@@ -93,6 +93,10 @@ export class Hazards implements CollisionMap {
       f.animate(Math.min(1, f.elapsed / FALL));
       if ((f.left -= dt) <= 0) {
         f.mesh.removeFromParent();
+        // Each painting and chandelier builds its own geometry; the materials are shared.
+        f.mesh.traverse((o) => {
+          if (o instanceof Mesh) o.geometry.dispose();
+        });
         this.falling.splice(this.falling.indexOf(f), 1);
       }
     }

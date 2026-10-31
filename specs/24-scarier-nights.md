@@ -1,5 +1,5 @@
 # 24: Scarier nights
-Status: Approved
+Status: Done
 Depends on: 07, 12, 13, 14, 19
 
 ## Goal
@@ -38,17 +38,17 @@ New creatures or rooms; the ending screens.
 
 ## Acceptance checks
 Must:
-- [ ] Unit: fear spikes, holds and eases off; bpm 68 to 160.
-- [ ] Unit: door scares only for a door the player opened from closed, a chandelier only where one hangs, about 30% of the time, deterministic.
-- [ ] Unit: La Sombra laughs when it confronts; darkness draws it from stalking, withdrawn or lost, not when dormant, caught or held off.
-- [ ] Unit: lines never repeat within the last five; cats only on furniture tops, about one room in seven; a painting only on a wall ahead within 1.2 to 3 m.
-- [ ] Playwright: after a scare the HUD heart reads over 110 bpm and pulses faster (screenshot).
-- [ ] Playwright: opening a door into a room with a chandelier (forced) sets off bats and brings the chandelier down 2 to 3 m ahead, in view (screenshot).
-- [ ] Playwright: La Sombra at a door (forced): with light it laughs, speaks and flees; in the dark it charges (screenshot of its eyes in the dark).
-- [ ] Playwright: switching the torch off draws La Sombra within 12 s with a darkness line.
-- [ ] Playwright: a cat on furniture with glowing eyes (screenshot); opening its door makes it scream and a vase shatter.
-- [ ] Playwright: the patriarch comes out from behind his portrait to within 1.3 m of the player; after midnight, coming back into the corridor, he speaks.
-- [ ] Every sound still renders without clipping, the stinger brighter than before.
+- [x] Unit: fear spikes, holds and eases off; bpm 68 to 160.
+- [x] Unit: door scares only for a door the player opened from closed, a chandelier only where one hangs, about 30% of the time, deterministic.
+- [x] Unit: La Sombra laughs when it confronts; darkness draws it from stalking, withdrawn or lost, not when dormant, caught or held off.
+- [x] Unit: lines never repeat within the last five; cats only on furniture tops, about one room in seven; a painting only on a wall ahead within 1.2 to 3 m.
+- [x] Playwright: after a scare the HUD heart reads over 110 bpm and pulses faster (screenshot).
+- [x] Playwright: opening a door into a room with a chandelier (forced) sets off bats and brings the chandelier down 2 to 3 m ahead, in view (screenshot).
+- [x] Playwright: La Sombra at a door (forced): with light it laughs, speaks and flees; in the dark it charges (screenshot of its eyes in the dark).
+- [x] Playwright: switching the torch off draws La Sombra within 12 s with a darkness line.
+- [x] Playwright: a cat on furniture with glowing eyes (screenshot); opening its door makes it scream and a vase shatter.
+- [x] Playwright: the patriarch comes out from behind his portrait to within 1.3 m of the player; after midnight, coming back into the corridor, he speaks.
+- [x] Every sound still renders without clipping, the stinger brighter than before.
 Should:
 - [ ] The user listens to the stinger, heartbeat, scream, shatter and La Sombra's voice and finds them right.
 
@@ -58,3 +58,8 @@ Vitest: fear, door scares, painting spots, La Sombra's rules, lines, cats. Playw
 ## Decisions
 - Asked for by the user on 31 October 2026, after finding the scares weak.
 - Debug: `&doorscare=bats|batsChandelier|rats` forces a door scare, `&sombra=door` brings La Sombra at the next door, `&cats=all` seats a cat wherever one fits.
+- La Sombra's voice is driven twice as hard into a soft limiter (tanh), not simply doubled, which clipped (peak 1.76): it is now peak 0.96, RMS 0.26.
+- A chandelier brought down by bats is the room's own: its hanging instance is taken down and it falls from where it hung, in front of the player as they open the door (2 to 5 m ahead).
+- Each cat, painting and dropped chandelier builds its own geometry, freed when it goes (the render test caught a leak when cats' rooms unloaded and reloaded).
+- Proof: unit tests `fear`, `door-scares` (with painting spots), `shadow` (laugh, attract, ambush), `lines`, `cats`; `tests/e2e/scarier.spec.ts`: the heart (`artifacts/screenshots/24-heart.png`), bats and the chandelier through a door (`24-door-bats.png`, `24-door-chandelier.png`), La Sombra at a door in the light, laughing and fleeing (`24-sombra-door.png`), and in the dark, charging with its eyes burning (`24-sombra-eyes.png`), drawn by darkness with a line, the cat's eyes (`24-cat-eyes.png`) and its scream and shattered vase; `tests/e2e/story.spec.ts`: the patriarch out of his portrait to a step away (`24-patriarch.png`) and speaking again in his corridor; `tests/e2e/shadow.spec.ts`: a painting falling ahead (`12-painting.png`); `tests/e2e/audio.spec.ts`: the stinger's brightness (2.1 kHz) and every sound under 1.
+- Not yet checked (Should): the user listening to the stinger, heartbeat, scream, shatter and La Sombra's voice.

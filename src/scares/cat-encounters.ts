@@ -36,6 +36,14 @@ const vaseShape = new LatheGeometry(
   8,
 );
 
+/** Off the scene, its geometry freed (each cat builds its own; the materials are shared). */
+function dispose(creature: Creature): void {
+  creature.group.removeFromParent();
+  creature.group.traverse((o) => {
+    if (o instanceof Mesh) o.geometry.dispose();
+  });
+}
+
 interface Cat {
   seat: CatSeat;
   chunkId: ChunkId;
@@ -72,7 +80,7 @@ export class CatEncounters {
     for (const id of [...diff.unloaded, ...diff.loaded.map((c) => c.id)]) {
       for (const [roomId, cat] of this.cats) {
         if (cat.chunkId !== id) continue;
-        cat.creature.group.removeFromParent();
+        dispose(cat.creature);
         cat.vase?.removeFromParent();
         this.cats.delete(roomId);
       }
@@ -144,7 +152,7 @@ export class CatEncounters {
         }
       }
       if (k >= 1 && !cat.vase) {
-        creature.group.removeFromParent();
+        dispose(creature);
         this.cats.delete(roomId);
         this.gone.add(roomId);
       }
