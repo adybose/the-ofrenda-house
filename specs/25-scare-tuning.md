@@ -1,5 +1,5 @@
 # 25: Scare tuning
-Status: Approved
+Status: Done
 Depends on: 07, 12, 13, 23, 24
 
 ## Goal
@@ -35,15 +35,15 @@ New creatures, rooms or spirits; changing the fear model itself.
 
 ## Acceptance checks
 Must:
-- [ ] Unit: score levels are 0 when calm, rise with fear, the strings and pulse come in only above their thresholds, never above their caps.
-- [ ] Unit: door scares about 55% of the time, a chandelier about 70% of those where one hangs; deterministic.
-- [ ] Unit: ambush odds 30% + 5% per threat with a 30 s gap; 65% with an 18 s gap by candlelight.
-- [ ] Playwright: the stinger is heavy (over 40% of its energy below 150 Hz) and loudest at the attack; every sound still renders without clipping.
-- [ ] Playwright: after a scare the score's drone rises above 0.02.
-- [ ] Playwright: a forced door scare brings a bat within 0.6 m of the camera.
-- [ ] Playwright: La Sombra's crash hazard, facing a room's chandelier, brings it down.
-- [ ] Playwright: with `&guide=3`, a whisper sounds within 4 m of the player.
-- [ ] Playwright: holding a lit candle with the torch off (`&sombra=candle`), La Sombra steps out within 20 s.
+- [x] Unit: score levels are 0 when calm, rise with fear, the strings and pulse come in only above their thresholds, never above their caps.
+- [x] Unit: door scares about 55% of the time, a chandelier about 70% of those where one hangs; deterministic.
+- [x] Unit: ambush odds 30% + 5% per threat with a 30 s gap; 65% with an 18 s gap by candlelight.
+- [x] Playwright: the stinger is heavy (over 40% of its energy below 150 Hz) and loudest at the attack; every sound still renders without clipping.
+- [x] Playwright: after a scare the score's drone rises above 0.02.
+- [x] Playwright: a forced door scare brings a bat within 0.6 m of the camera.
+- [x] Playwright: La Sombra's crash hazard, facing a room's chandelier, brings it down.
+- [x] Playwright: with `&guide=3`, a whisper sounds within 4 m of the player.
+- [x] Playwright: holding a lit candle with the torch off (`&sombra=candle`), La Sombra steps out within 20 s.
 Should:
 - [ ] The user listens to the piano stinger, the score and the heartbeat, and plays to judge how often the scares come.
 
