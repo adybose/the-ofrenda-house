@@ -24,6 +24,7 @@ import { EXIT_KEY } from './story/accusation';
 import { Finale } from './story/finale';
 import { Dawn } from './story/dawn';
 import { Guide } from './story/guide';
+import { FearController } from './story/fear-controller';
 import { Monologue } from './story/thoughts';
 import { createThoughts } from './ui/thought';
 import { ItemsController } from './items/controller';
@@ -238,6 +239,8 @@ async function startGame(): Promise<void> {
   // Conversations, the journal and the HUD (spec 10). Dialogue or the journal stops the player
   // moving; the journal also pauses the world while it is open.
   const hud = createHud({ prompt });
+  // The player's fear (spec 24): the heartbeat and the heart on the HUD.
+  const fear = new FearController({ audio, hud });
   events.on('batteryChanged', ({ level }) => hud.set('battery', level));
   let journal: Journal | undefined = undefined;
   let encounters: Encounters | undefined = undefined;
@@ -336,6 +339,7 @@ async function startGame(): Promise<void> {
     scene,
     caption: createCaption(),
     suppressed: () => caught || story!.isActive() || dawn!.over() || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters!.isActive(),
+    onTension: (level) => fear.hold(level),
   });
   hazards = new Hazards({ seed, house, doors, flashlight, audio, player, scene, textures });
   events.on('caughtByShadow', () => {
@@ -490,6 +494,7 @@ async function startGame(): Promise<void> {
       dawn!.update(dt, time / 1000, caught || ended || finale!.isActive() || dialogue.isOpen() || journal!.isOpen() || encounters.isActive());
       monologue.update(dt, heldOff);
       guide.update(dt, !heldOff && story!.stage === 'act2' && !dawn!.over());
+      fear.update(dt);
       // After dawn the scares are over too (spec 22).
       scares!.update(dt, heldOff || dawn!.over());
     }

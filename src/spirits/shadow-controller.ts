@@ -46,6 +46,8 @@ export interface ShadowOptions {
   caption: Caption;
   /** Encounters, the journal, dialogue: it holds off. */
   suppressed(): boolean;
+  /** How frightening its nearness is, 0..1 (spec 24's fear holds at least this). */
+  onTension?(level: number): void;
 }
 
 /**
@@ -136,7 +138,7 @@ export class ShadowController {
   update(dt: number, time: number): void {
     this.figure.update(time);
     if (!this.enabled) return;
-    const { player, items, flashlight, audio, suppressed } = this.options;
+    const { player, items, flashlight, suppressed } = this.options;
     const p = player.state();
     const playerCell = worldToCell(p.x, p.z);
     const hushed = suppressed();
@@ -158,7 +160,7 @@ export class ShadowController {
     this.figure.position.set(this.x, 0, this.z);
     this.figure.rotation.y = Math.atan2(p.x - this.x, p.z - this.z);
     const near = shown ? Math.min(1, Math.max(0, 1 - (distance - 2) / 16)) : 0;
-    audio.setTension(this.state.mode === 'chasing' ? near : near * 0.6);
+    this.options.onTension?.(this.state.mode === 'chasing' ? Math.max(0.85, near) : near * 0.6);
     flashlight.setFlicker(this.state.mode === 'chasing' && distance < 8 ? 0.8 * (1 - distance / 8) : 0);
   }
 
