@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { THOUGHTS, THOUGHT_SECONDS, createMonologue, monologueReducer, type MonologueContext, type MonologueEvent, type MonologueState, type Trigger } from '../../src/story/monologue';
+import { THOUGHTS, THOUGHT_SECONDS, createMonologue, isStale, monologueReducer, type MonologueContext, type MonologueEvent, type MonologueState, type Trigger } from '../../src/story/monologue';
 
 const CTX: MonologueContext = { battery: 0.65, critical: false, hasMatchbox: false, matches: 8, hasCandle: false, heldLit: false, heldBurnLeft: 0, nearMatchbox: false, inLight: false };
 
@@ -40,6 +40,13 @@ describe('thoughts', () => {
     expect(idle.shown[1]!.at).toBeGreaterThanOrEqual(20);
     const acted = play([{ type: 'think', id: 'findCandle', now: 0 }, ...ticks(0, 10), ...ticks(10.5, 30, { hasMatchbox: true, hasCandle: true })]);
     expect(acted.shown.map((s) => s.id)).toEqual(['findCandle']);
+    // Still waiting its turn when the player picks up a candle: it is dropped.
+    const waited = play([...ticks(0, 3, {}, true), { type: 'think', id: 'findCandle', now: 3 }, ...ticks(3, 8, { hasCandle: true }, true), ...ticks(8.5, 40, { hasCandle: true })]);
+    expect(waited.shown).toEqual([]);
+    // On screen already, it is stale once a candle is in hand or pocket.
+    expect(isStale('findCandle', CTX)).toBe(false);
+    expect(isStale('findCandle', { ...CTX, hasCandle: true })).toBe(true);
+    expect(isStale('seeCandle', { ...CTX, hasCandle: true })).toBe(false);
   });
 
   it('show one at a time, and wait while something else holds the screen', () => {

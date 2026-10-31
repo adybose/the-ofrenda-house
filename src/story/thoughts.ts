@@ -9,7 +9,7 @@ import type { House } from '../world/house';
 import { standsOf } from '../world/stands';
 import { worldToCell } from '../world/units';
 import { EXIT_KEY } from './accusation';
-import { createMonologue, monologueReducer, type MonologueContext, type MonologueEvent, type Trigger, type Vars } from './monologue';
+import { createMonologue, isStale, monologueReducer, type MonologueContext, type MonologueEvent, type Trigger, type Vars } from './monologue';
 
 declare module '../core/events' {
   interface GameEvents {
@@ -37,6 +37,8 @@ export class Monologue {
   private state = createMonologue();
   private now = 0;
   private wasBlocked = false;
+  /** The thought last put on screen. */
+  private showing: string | undefined;
   private readonly stand;
 
   constructor(private readonly deps: MonologueDeps) {
@@ -56,7 +58,13 @@ export class Monologue {
     // Whatever takes the screen clears the thought at once.
     if (blocked && !this.wasBlocked) this.deps.thoughts.hide();
     this.wasBlocked = blocked;
-    this.dispatch({ type: 'tick', ctx: this.context(), now: this.now, blocked });
+    const ctx = this.context();
+    // A thought the player has already acted on goes at once (a candle found while it was up).
+    if (this.showing && isStale(this.showing, ctx)) {
+      this.deps.thoughts.hide();
+      this.showing = undefined;
+    }
+    this.dispatch({ type: 'tick', ctx, now: this.now, blocked });
   }
 
   private fire(trigger: Trigger, vars?: Vars): void {
@@ -67,6 +75,7 @@ export class Monologue {
     this.state = monologueReducer(this.state, event);
     const show = this.state.show;
     if (!show) return;
+    this.showing = show.id;
     this.deps.thoughts.show(show.id, show.text);
     events.emit('thoughtShown', { id: show.id });
   }
