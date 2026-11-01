@@ -1,5 +1,5 @@
 # 15: Release and write-up
-Status: Approved
+Status: Done
 Depends on: 00 to 14, 16 to 22
 
 ## Goal
@@ -23,11 +23,11 @@ New features or content. Only bug fixes found while preparing the release.
 
 ## Acceptance checks
 Must:
-- [ ] From a fresh clone in a new directory, `npm ci` then `npm start` serves a playable game with Ollama switched off.
-- [ ] The Playwright offline guard passes against the production build.
-- [ ] The README covers setup, start, controls and running without Ollama or Piper.
-- [ ] `docs/post.md` exists as a complete draft.
-- [ ] Every spec is Done or records its cuts.
+- [x] From a fresh clone in a new directory, `npm ci` then `npm start` serves a playable game with Ollama switched off.
+- [x] The Playwright offline guard passes against the production build.
+- [x] The README covers setup, start, controls and running without Ollama or Piper.
+- [x] `docs/post.md` exists as a complete draft.
+- [x] Every spec is Done or records its cuts.
 Should:
 - [ ] The GitHub repo is public with the Actions workflow green on `main`, before the post goes live.
 - [ ] The demo video is recorded and linked.
@@ -40,3 +40,5 @@ Manual: fresh-clone run, final playthrough, video. Playwright: offline guard on 
 - 1 November 2026 (IST): the user wants the game played only locally on a Mac, never deployed. `npm start` reuses Vite's preview of the built game (which already proxies `/api`) and the local Fastify server, rather than having Fastify serve files: no new code path to test, no new dependency.
 - The voice models are not in the repo (241 MB, gitignored): `npm run setup:voices` creates `voices/` and downloads them once at setup. The game itself makes no request outside localhost.
 - The screenshots in `docs/screenshots/` were chosen by the user.
+- Proof: a fresh clone in a new directory (no `voices/`), `npm ci`, then the `npm start` commands with Ollama pointed at a dead port: the game served on localhost, `/api/health` answered `{"ok":true,"ollama":false,"piper":false}` through the proxy, and the status block said "missing Ollama" and "missing Piper voice models (voices/)" with the command for each. (The user's own `npm start` held port 4173, so the clone's preview ran on 4174.) The full Playwright suite, 94 tests including the offline guard in `tests/e2e/offline.spec.ts`, passed against the production build; `npm run check` passed with 331 unit tests. Every other spec is Done with its Must checks ticked.
+- Left to the user (Should): the demo video and its links in `README.md` and `docs/post.md` (marked TODO, with the challenge name), the Actions run on GitHub, and a full playthrough with real Ollama and Piper.
